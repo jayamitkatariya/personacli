@@ -16,20 +16,100 @@ data is still just `.md` files.
 
 ![Persona workspace](docs/screenshots/edge-check.png)
 
-## Install
+## Quick start (macOS)
+
+### Prerequisites
+
+- **Node.js ≥ 20** — install via [Homebrew](https://brew.sh)
+  (`brew install node`) or [nvm](https://github.com/nvm-sh/nvm).
+  Check with `node --version`.
+- **Git** — comes with Xcode Command Line Tools
+  (`xcode-select --install`), or `brew install git`.
+- macOS **14+**. Windows and Linux aren't supported yet.
+
+### 1. Get the code
 
 ```sh
-npm install -g persona
+git clone https://github.com/jayamitkatariya/personacli.git
+cd personacli
 ```
 
-Or from this repo:
+### 2. Install dependencies and build
 
 ```sh
 npm install
-npm run build
-npm install -g .     # installs the `persona` command
-persona               # first run walks you through setup in the browser
 ```
+
+This installs everything and builds the server, CLI and web app for you.
+To build manually (e.g. after a `git pull`):
+
+```sh
+npm run build
+```
+
+### 3. Install the `persona` command
+
+```sh
+npm install -g .
+```
+
+### 4. Run it
+
+```sh
+persona
+```
+
+The first run opens a setup guide in your browser: pick a workspace folder
+(created for you if it doesn't exist), optionally connect an AI model, and
+you're in. A `Notes/Welcome.md` note greets you with a tour.
+
+### Verify it works
+
+```sh
+persona doctor   # health check: node, workspace, server, AI config
+persona path     # prints your workspace path
+```
+
+### Updating
+
+```sh
+cd personacli
+git pull
+npm install
+```
+
+### Uninstalling
+
+```sh
+npm uninstall -g persona
+rm -rf ~/.persona        # config, keychain-stored keys stay in Keychain
+```
+
+### Optional extras
+
+| Extra | Install | What you get |
+| --- | --- | --- |
+| [Ollama](https://ollama.com) | `brew install ollama && ollama pull llama3.2` | Free, private local AI — detected automatically, no API key |
+| `ffmpeg` | `brew install ffmpeg` | Voice input (records + transcribes in chat) |
+| parakeet model | [parakeet.cpp releases](https://github.com/mudler/parakeet.cpp/releases) | Local speech-to-text model for voice input |
+
+For voice input, point Persona at your parakeet binary and model:
+
+```sh
+export PERSONA_STT_BIN=/path/to/parakeet-cli
+export PERSONA_STT_MODEL=/path/to/model.gguf
+persona
+```
+
+### Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| `persona: command not found` | `npm install -g .` again, and check `npm config get prefix` is on your `PATH` |
+| Server won't start / port errors | `persona doctor`, then check `~/.persona/logs/server.log` |
+| Chat says "no model configured" | Open **Settings → AI** (⌘,) and add a provider, or install Ollama |
+| You run `persona` and nothing happens | The server may already be running — press ⌘K in the browser, or kill it with `pkill -f "dist/server/index"` and retry |
+| Voice input fails | `ffmpeg` must be installed and `PERSONA_STT_MODEL` must point at a valid GGUF |
 
 ## First run
 
@@ -180,9 +260,11 @@ silently falls back to keyword-only.
 **Voice input (macOS).** The chat box has a mic button for local
 speech-to-text via [parakeet.cpp](https://github.com/mudler/parakeet.cpp).
 Requires `ffmpeg` (`brew install ffmpeg`) and a parakeet-compatible GGUF model.
-Point Persona at them with `PERSONA_STT_MODEL=/path/to/model.gguf` and
-`PERSONA_STT_BIN=/path/to/parakeet-cli` (the binary is bundled in `bin/` when
-built from this repo; on Apple Silicon the model runs on Metal).
+Grab a prebuilt `parakeet-cli` for macOS from the
+[releases page](https://github.com/mudler/parakeet.cpp/releases) and point
+Persona at both with `PERSONA_STT_MODEL=/path/to/model.gguf` and
+`PERSONA_STT_BIN=/path/to/parakeet-cli` (on Apple Silicon the model runs on
+Metal).
 
 ## Appearance
 

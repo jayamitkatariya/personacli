@@ -22,7 +22,8 @@
     "dev:web": "vite",
     "dev:server": "tsx watch src/server/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.web.json --noEmit",
-    "start": "node dist/cli/index.js"
+    "start": "node dist/cli/index.js",
+    "prepare": "npm run build"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.4",
