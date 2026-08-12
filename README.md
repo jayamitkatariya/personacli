@@ -14,7 +14,7 @@ Starts the local server, opens your browser, and you're in your workspace.
 No accounts, no cloud, no database. If Persona disappeared tomorrow, your
 data is still just `.md` files.
 
-![Persona workspace](docs/screenshots/edge-check.png)
+![Persona workspace](docs/screenshots/persona-workspace.png)
 
 ## Quick start (macOS)
 
@@ -25,7 +25,8 @@ data is still just `.md` files.
   Check with `node --version`.
 - **Git** — comes with Xcode Command Line Tools
   (`xcode-select --install`), or `brew install git`.
-- macOS **14+**. Windows and Linux aren't supported yet.
+- macOS **12+** (Apple Silicon recommended — voice input runs on Metal).
+  Windows and Linux aren't supported yet.
 
 ### 1. Get the code
 
@@ -83,7 +84,10 @@ npm install -g .  # update the `persona` command itself
 
 ```sh
 npm uninstall -g persona
-rm -rf ~/.persona        # config, keychain-stored keys stay in Keychain
+pkill -f "dist/server/index"  # stop a running server, if any
+rm -rf ~/.persona              # config; AI keys stay in Keychain — delete
+                               # the "persona" service entries in Keychain Access
+                               # to remove them
 ```
 
 ### Optional extras
@@ -107,6 +111,7 @@ persona
 | Symptom | Fix |
 | --- | --- |
 | `persona: command not found` | `npm install -g .` again, and check `npm config get prefix` is on your `PATH` |
+| `npm install -g .` fails with `EACCES` | Your npm prefix isn't writable — install Node via [nvm](https://github.com/nvm-sh/nvm) or [Homebrew](https://brew.sh) (or use `sudo` as a last resort) |
 | Server won't start / port errors | `persona doctor`, then check `~/.persona/logs/server.log` |
 | Chat says "no model configured" | Open **Settings → AI** (⌘,) and add a provider, or install Ollama |
 | You run `persona` and nothing happens | The server may already be running — press ⌘K in the browser, or kill it with `pkill -f "dist/server/index"` and retry |
@@ -134,7 +139,7 @@ appear in the sidebar untouched, and the welcome note is only created once.
 | Command | What it does |
 | --- | --- |
 | `persona` | Start the server if needed, open the workspace in your browser |
-| `persona open` | Same as above |
+| `persona open` | Start the server if needed, open the workspace in your browser |
 | `persona note "text"` | Append a line to today's journal note (`Notes/YYYY-MM-DD.md`) |
 | `persona task "Buy domain tomorrow #personal !!"` | Create a task (natural language) without opening the browser |
 | `persona triage` | Ask the AI to review your open tasks (suggestions only) |
@@ -309,7 +314,7 @@ welcome. Guidelines:
 ## Architecture
 
 ```
-persona CLI ── spawns ──▶ local Hono server (127.0.0.1:4321)
+persona CLI ── spawns ──▶ local Hono server (127.0.0.1:4321 — first free port)
                               │  REST API + SSE events
                               ├─ filesystem (chokidar watcher)
                               ├─ tasks (Markdown + frontmatter)
