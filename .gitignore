@@ -1,0 +1,10 @@
+node_modules/
+dist/
+web/dist/
+*.log
+.DS_Store
+.testhome/
+bin/
+.env
+*.local
+coverage/

@@ -1,0 +1,715 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas,
+    monospace;
+  --font-serif: "Newsreader Variable", Georgia, "Times New Roman", serif;
+
+  /* Border-radius scale — single source of truth for all rounded-* utilities. */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-3xl: 24px;
+
+  /* Semantic surfaces (warm stone ramp). Dark mode overrides below, so the
+     whole app flips through these tokens instead of scattered hex values. */
+  --color-surface: #fafaf9; /* stone-50  — app background */
+  --color-surface-raised: #ffffff; /* card / editor background */
+  --color-soft: #f5f5f4; /* stone-100 — subtle fills */
+  --color-ink: #1c1917; /* stone-900 — strong text */
+  --color-ink-soft: #292524; /* stone-800 — body text */
+  --color-ink-muted: #57534e; /* stone-600 — secondary text */
+  --color-ink-subtle: #a8a29e; /* stone-400 — hints */
+  --color-edge: #e7e5e4; /* stone-200 — hairline borders */
+  --color-edge-strong: #d6d3d1; /* stone-300 — stronger borders */
+
+  /* Typography presets — driven by Settings (see lib/typography.ts). */
+  --font-size-base: 13px;
+  --font-size-prose: 14px;
+  --density-py: 0px;
+  --density-leading: 1.6;
+  --prose-leading: 1.65;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  line-height: var(--density-leading);
+  color: var(--color-ink-soft);
+  background: var(--color-surface);
+  font-variant-ligatures: var(--liga, normal);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.dark body {
+  color: var(--color-ink-soft);
+  background: var(--color-surface);
+}
+
+/* Dark-mode token overrides — refined warm stone palette, no pure black. */
+.dark {
+  --color-surface: #1c1917; /* stone-900 */
+  --color-surface-raised: #292524; /* stone-800 */
+  --color-soft: #44403c; /* stone-700 */
+  --color-ink: #fafaf9; /* stone-50 */
+  --color-ink-soft: #e7e5e4; /* stone-200 */
+  --color-ink-muted: #a8a29e; /* stone-400 */
+  --color-ink-subtle: #78716c; /* stone-500 */
+  --color-edge: #57534e; /* stone-600 */
+  --color-edge-strong: #44403c; /* stone-700 */
+}
+
+::selection {
+  background: var(--color-blue-100);
+}
+
+.dark ::selection {
+  background: var(--color-blue-700);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #d6d3d1 transparent;
+}
+
+.dark * {
+  scrollbar-color: #57534e transparent;
+}
+
+/* hide textarea resize handle */
+textarea {
+  resize: none;
+}
+
+/* ---- draggable titlebar (top of window) ---- */
+header.drag {
+  -webkit-app-region: drag;
+}
+header.drag button {
+  -webkit-app-region: no-drag;
+}
+
+/* ---- aura: subtle animated gradient accents ---- */
+@property --aura-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes aura-spin {
+  to {
+    --aura-angle: 360deg;
+  }
+}
+
+@keyframes aura-text-slide {
+  to {
+    background-position: 200% center;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* rotating pastel gradient border (white fill preserved) */
+.aura-border {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(#fff, #fff) padding-box,
+    conic-gradient(
+        from var(--aura-angle),
+        rgba(var(--aura-1), 0.45),
+        rgba(var(--aura-2), 0.4),
+        rgba(var(--aura-3), 0.35),
+        rgba(var(--aura-4), 0.3),
+        rgba(var(--aura-1), 0.45)
+      )
+      border-box;
+  animation: aura-spin 8s linear infinite;
+}
+
+/* gradient ring that fades in on focus-within */
+.focus-aura {
+  position: relative;
+}
+.focus-aura::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--aura-angle),
+    rgba(var(--aura-1), 0.6),
+    rgba(var(--aura-2), 0.55),
+    rgba(var(--aura-3), 0.45),
+    rgba(var(--aura-4), 0.4),
+    rgba(var(--aura-1), 0.6)
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  animation: aura-spin 8s linear infinite;
+  pointer-events: none;
+}
+.focus-aura:focus-within::after {
+  opacity: 1;
+}
+
+/* slow-shifting gradient text (wordmark) */
+.gradient-text {
+  background: linear-gradient(
+    90deg,
+    var(--g1),
+    var(--g2),
+    var(--g3),
+    var(--g4),
+    var(--g1)
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: aura-text-slide 8s linear infinite;
+}
+
+/* gradient CTA button */
+.btn-aura {
+  background: linear-gradient(120deg, var(--g1), var(--g2) 55%, var(--g3));
+  background-size: 180% 100%;
+  background-position: 0% 0%;
+  transition:
+    background-position 0.5s ease,
+    filter 0.2s ease;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.15) inset,
+    0 1px 2px rgba(0, 0, 0, 0.08),
+    0 6px 16px -6px rgba(124, 58, 237, 0.45);
+}
+.btn-aura:hover:not(:disabled) {
+  background-position: 95% 0%;
+  filter: brightness(1.05);
+}
+
+/* user chat bubble */
+.bubble-gradient {
+  background: linear-gradient(135deg, var(--g1), var(--g2));
+}
+
+.pop-in {
+  animation: pop-in 0.18s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aura-border,
+  .gradient-text,
+  .focus-aura::after,
+  .pop-in,
+  .confetti-piece,
+  .row-in,
+  .row-done-flash,
+  .check-pop,
+  .task-strike,
+  .msg-in,
+  .saved-flash {
+    animation: none;
+  }
+}
+
+/* ---- smooth theme switch (light ↔ dark) ----
+   `theme-transition` is added to <html> by the app right before the `dark`
+   class flips and removed ~650ms later, so background/foreground colors ease
+   between themes instead of snapping. */
+@media (prefers-reduced-motion: no-preference) {
+  .theme-transition,
+  .theme-transition *,
+  .theme-transition *::before,
+  .theme-transition *::after {
+    transition:
+      background-color 0.45s ease,
+      border-color 0.45s ease,
+      color 0.45s ease,
+      fill 0.45s ease,
+      stroke 0.45s ease,
+      box-shadow 0.45s ease,
+      background 0.45s ease !important;
+  }
+}
+
+/* ---- confetti burst (journal entries) ---- */
+@keyframes confetti-fall {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) rotate(0deg) scale(0.5);
+  }
+  10% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(1);
+  }
+}
+.confetti-piece {
+  position: fixed;
+  pointer-events: none;
+  opacity: 0;
+  animation: confetti-fall 1.7s cubic-bezier(0.16, 0.84, 0.44, 1) var(--delay)
+    forwards;
+}
+
+/* ---- task rows ---- */
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.row-in {
+  animation: row-in 0.3s ease-out;
+}
+
+@keyframes row-flash {
+  from {
+    background-color: rgba(16, 185, 129, 0.1);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+.row-done-flash {
+  animation: row-flash 0.9s ease-out;
+}
+
+@keyframes check-pop {
+  0% {
+    transform: scale(0.4);
+  }
+  60% {
+    transform: scale(1.25);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.check-pop {
+  animation: check-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes strike-in {
+  from {
+    background-size: 0% 2px;
+  }
+  to {
+    background-size: 100% 2px;
+  }
+}
+.task-strike {
+  background-image: linear-gradient(currentColor, currentColor);
+  background-repeat: no-repeat;
+  background-position: left 52%;
+  animation: strike-in 0.3s ease-out forwards;
+}
+
+/* ---- chat messages ---- */
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.msg-in {
+  animation: msg-in 0.22s ease-out;
+}
+
+/* ---- status bar saved flash ---- */
+@keyframes saved-flash {
+  0% {
+    opacity: 0.35;
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+.saved-flash {
+  color: #10b981;
+  animation: saved-flash 1s ease-out;
+}
+
+/* ---- markdown preview ---- */
+.md-body {
+  line-height: var(--prose-leading);
+  color: var(--color-ink-soft);
+  font-size: var(--font-size-prose);
+}
+.md-body > *:first-child {
+  margin-top: 0;
+}
+.md-body h1 {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 1.4em 0 0.5em;
+  color: var(--color-ink);
+}
+.md-body h2 {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 1.4em 0 0.4em;
+  color: var(--color-ink);
+}
+.md-body h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 1.2em 0 0.3em;
+  color: var(--color-ink);
+}
+.md-body p {
+  margin: 0.6em 0;
+}
+.md-body a {
+  color: #2563eb;
+  text-decoration: none;
+}
+.md-body a:hover {
+  text-decoration: underline;
+}
+.md-body ul {
+  list-style: disc;
+  padding-left: 1.4em;
+  margin: 0.6em 0;
+}
+.md-body ol {
+  list-style: decimal;
+  padding-left: 1.4em;
+  margin: 0.6em 0;
+}
+.md-body li {
+  margin: 0.2em 0;
+}
+.md-body li input[type="checkbox"] {
+  margin-right: 0.4em;
+  accent-color: #2563eb;
+}
+.md-body blockquote {
+  border-left: 3px solid var(--color-edge-strong);
+  padding-left: 1em;
+  margin: 0.8em 0;
+  color: var(--color-ink-muted);
+}
+.md-body code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--color-soft);
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-sm);
+  padding: 0.1em 0.35em;
+}
+.md-body pre {
+  background: var(--color-stone-900);
+  color: var(--color-stone-200);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  overflow-x: auto;
+  margin: 0.8em 0;
+}
+.md-body pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: inherit;
+}
+.md-body table {
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  width: 100%;
+  font-size: 0.95em;
+}
+.md-body th,
+.md-body td {
+  border: 1px solid var(--color-edge);
+  padding: 6px 10px;
+  text-align: left;
+}
+.md-body th {
+  background: var(--color-surface);
+  font-weight: 600;
+}
+.md-body img {
+  max-width: 100%;
+  border-radius: var(--radius-lg);
+  margin: 0.8em 0;
+}
+.md-body hr {
+  border: none;
+  border-top: 1px solid var(--color-edge);
+  margin: 1.2em 0;
+}
+
+.dark .md-body {
+  color: var(--color-ink-soft);
+}
+.dark .md-body h1,
+.dark .md-body h2,
+.dark .md-body h3 {
+  color: var(--color-ink);
+}
+.dark .md-body blockquote {
+  border-left-color: var(--color-edge);
+  color: var(--color-ink-muted);
+}
+.dark .md-body th,
+.dark .md-body td {
+  border-color: var(--color-edge);
+}
+.dark .md-body th {
+  background: var(--color-soft);
+}
+.dark .md-body hr {
+  border-top-color: var(--color-edge);
+}
+
+.dark .aura-border {
+  background:
+    linear-gradient(var(--color-surface-raised), var(--color-surface-raised)) padding-box,
+    conic-gradient(
+        from var(--aura-angle),
+        rgba(var(--aura-1), 0.45),
+        rgba(var(--aura-2), 0.4),
+        rgba(var(--aura-3), 0.35),
+        rgba(var(--aura-4), 0.3),
+        rgba(var(--aura-1), 0.45)
+      )
+      border-box;
+}
+
+.hljs-keyword {
+  color: #c084fc;
+}
+.hljs-string {
+  color: #86efac;
+}
+.hljs-number {
+  color: #fbbf24;
+}
+.hljs-title,
+.hljs-title.function_ {
+  color: #93c5fd;
+}
+.hljs-comment {
+  color: #a8a29e;
+  font-style: italic;
+}
+.hljs-built_in,
+.hljs-type {
+  color: #fbbf24;
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-property {
+  color: #93c5fd;
+}
+.hljs-variable,
+.hljs-template-variable {
+  color: #f9a8d4;
+}
+.hljs-operator,
+.hljs-punctuation {
+  color: #d6d3d1;
+}
+
+/* ---- CodeMirror ---- */
+.cm-editor {
+  height: 100%;
+  outline: none !important;
+}
+.cm-editor .cm-scroller {
+  font-family: var(--font-mono);
+  font-size: calc(var(--font-size-base) + 0.5px);
+  line-height: var(--density-leading);
+  overflow: auto;
+}
+.cm-editor .cm-content {
+  padding-top: calc(20px + var(--density-py));
+}
+.cm-editor.cm-focused {
+  outline: none;
+}
+
+.dark .cm-editor {
+  background: var(--color-surface-raised);
+  color: var(--color-ink);
+}
+.dark .cm-editor .cm-content {
+  caret-color: var(--color-blue-500);
+}
+.dark .cm-editor .cm-cursor,
+.dark .cm-editor .cm-dropCursor {
+  border-left-color: var(--color-blue-500);
+}
+.dark .cm-editor .cm-selectionBackground,
+.dark .cm-editor.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground {
+  background: #334155;
+}
+.dark .cm-editor .cm-gutters {
+  background: var(--color-surface-raised);
+  color: var(--color-ink-subtle);
+}
+.dark .cm-editor .cm-activeLineGutter {
+  background: var(--color-surface-raised);
+  color: var(--color-ink-muted);
+}
+.dark .cm-editor .cm-matchingBracket {
+  background: var(--color-soft);
+  outline: 1px solid var(--color-ink-subtle);
+}
+.dark .cm-editor .cm-searchMatch {
+  background: rgba(var(--accent-rgb), 0.35);
+}
+.dark .cm-editor .cm-panel {
+  background: var(--color-soft);
+  color: var(--color-ink-soft);
+}
+.dark .cm-editor .cm-panel input {
+  background: var(--color-surface-raised);
+  color: var(--color-ink);
+  border: 1px solid var(--color-edge);
+}
+.dark .cm-editor .cm-tooltip {
+  background: var(--color-soft);
+  border: 1px solid var(--color-edge);
+  color: var(--color-ink-soft);
+}
+.dark .cm-editor .cm-activeLine {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* ---- chat citation line flash (jump from a source chip) ---- */
+.cm-cite-highlight {
+  background: rgba(var(--accent-rgb), 0.35);
+  border-radius: 2px;
+  animation: cite-fade 2s ease-out forwards;
+}
+@keyframes cite-fade {
+  0% {
+    background: rgba(var(--accent-rgb), 0.45);
+  }
+  100% {
+    background: rgba(var(--accent-rgb), 0.08);
+  }
+}
+.dark .cm-cite-highlight {
+  background: rgba(var(--accent-rgb), 0.4);
+}
+
+/* ---- optional serif for prose (Settings → Typography) ---- */
+.prose-serif .md-body,
+.prose-serif .cm-editor .cm-content {
+  font-family: var(--font-serif);
+}
+.prose-serif .cm-editor .cm-content {
+  font-size: calc(var(--font-size-base) + 1px);
+}
+
+/* ---- editor AI assist bubble / slash menu ---- */
+.cm-ai-bubble {
+  z-index: 30;
+}
+.cm-ai-bubble-popover {
+  z-index: 40;
+}
+
+/* ---- chat typing caret ---- */
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+.chat-caret {
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  background: var(--color-blue-600);
+  border-radius: 1px;
+  vertical-align: -2px;
+  animation: blink 1s steps(1) infinite;
+}
+
+/* ---- chat assistant markdown (sits on top of .md-body, must come after) ---- */
+.md-body.chat-md {
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+.md-body.chat-md h1 {
+  font-size: 18px;
+  margin: 0.9em 0 0.35em;
+}
+.md-body.chat-md h2 {
+  font-size: 15.5px;
+  margin: 0.9em 0 0.3em;
+}
+.md-body.chat-md h3 {
+  font-size: 14px;
+  margin: 0.8em 0 0.25em;
+}
+.md-body.chat-md p {
+  margin: 0.45em 0;
+}
+.md-body.chat-md ul,
+.md-body.chat-md ol {
+  margin: 0.45em 0;
+}
+.md-body.chat-md pre {
+  margin: 0.6em 0;
+}
+.md-body.chat-md > *:first-child {
+  margin-top: 0;
+}
+.md-body.chat-md > *:last-child {
+  margin-bottom: 0;
+}
