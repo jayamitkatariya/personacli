@@ -14,8 +14,6 @@ Starts the local server, opens your browser, and you're in your workspace.
 No accounts, no cloud, no database. If Persona disappeared tomorrow, your
 data is still just `.md` files.
 
-![Persona workspace](docs/screenshots/persona-workspace.png)
-
 ## Quick start (macOS)
 
 ### Prerequisites
