@@ -147,7 +147,7 @@ export const useStore = create<Store>((set, get) => ({
   configured: false,
   onboarding: false,
   settings: null,
-  view: "write",
+  view: "chat",
   tree: [],
   tasks: [],
   pins: { files: [], tasks: [], missing: [] },

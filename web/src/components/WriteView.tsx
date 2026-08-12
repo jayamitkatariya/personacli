@@ -420,7 +420,7 @@ function WriteEmptyState({
               <div className="text-[11px] uppercase tracking-wider text-stone-400 dark:text-stone-500 font-medium mb-2">
                 Shortcuts
               </div>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="grid grid-cols-2 gap-1.5">
                 {(
                   [
                     ["⌘N", "New file"],
@@ -431,7 +431,7 @@ function WriteEmptyState({
                 ).map(([key, label]) => (
                   <span
                     key={key}
-                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-white dark:bg-stone-900/60 border border-stone-200 dark:border-stone-700/80 text-[11px] text-stone-500 dark:text-stone-400"
+                    className="flex items-center justify-center gap-1.5 px-2 py-1 rounded-md bg-white dark:bg-stone-900/60 border border-stone-200 dark:border-stone-700/80 text-[11px] text-stone-500 dark:text-stone-400"
                   >
                     <kbd className="font-semibold text-stone-700 dark:text-stone-200">{key}</kbd>
                     {label}
