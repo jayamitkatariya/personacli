@@ -75,7 +75,8 @@ persona path     # prints your workspace path
 ```sh
 cd personacli
 git pull
-npm install
+npm install       # installs new deps and rebuilds
+npm install -g .  # update the `persona` command itself
 ```
 
 ### Uninstalling
