@@ -14,6 +14,18 @@ Starts the local server, opens your browser, and you're in your workspace.
 No accounts, no cloud, no database. If Persona disappeared tomorrow, your
 data is still just `.md` files.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/chat.png" alt="Chat view — ask questions about your workspace" width="100%">
+</p>
+<p align="center">
+  <img src="docs/screenshots/workspace.png" alt="Workspace view — write and edit Markdown notes" width="100%">
+</p>
+<p align="center">
+  <img src="docs/screenshots/tasks.png" alt="Tasks view — personal task list with project tags" width="100%">
+</p>
+
 ## Quick start (macOS)
 
 ### Prerequisites
