@@ -220,9 +220,15 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   reloadSettings: async () => {
-    const prevWorkspace = get().settings?.workspace ?? null;
+    const prev = get().settings;
+    const prevWorkspace = prev?.workspace ?? null;
     const settings = await api.getSettings().catch(() => null);
     const nextWorkspace = settings?.workspace ?? null;
+    // Cosmetic/AI settings changes (theme, accent, typography, provider…)
+    // don't touch the file tree — only re-pull workspace data when the
+    // workspace path itself changed or the app just became configured.
+    const workspaceChanged =
+      (prevWorkspace ?? "") !== (nextWorkspace ?? "") || (nextWorkspace !== null && !prev?.configured);
     set({
       settings,
       configured: Boolean(settings?.configured),
@@ -234,7 +240,7 @@ export const useStore = create<Store>((set, get) => ({
         prevWorkspace && nextWorkspace && prevWorkspace !== nextWorkspace ? null : get().activeDocPath,
       pendingLineJump: null,
     });
-    if (settings?.configured) {
+    if (settings?.configured && workspaceChanged) {
       get().refreshTree();
       get().refreshTasks();
       get().refreshPins();

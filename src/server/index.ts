@@ -218,6 +218,7 @@ app.put("/api/settings", async (c) => {
     };
     writeConfig(config);
     invalidateOllamaCache();
+    broadcaster.emitEvent({ type: "settings" });
   }
 
   if (body.embeddingAiKey !== undefined) {
