@@ -56,10 +56,10 @@ async function probeTags(host: string, timeoutMs: number): Promise<string[] | nu
 async function probe(host: string, timeoutMs: number): Promise<LocalAiInfo | null> {
   const models = await probeTags(host, timeoutMs);
   if (!models) return null;
-  if (models.length === 0) return { name: "Ollama", baseUrl: `${host}/v1`, model: "" };
+  if (models.length === 0) return { name: "Ollama", baseUrl: `${host}/v1`, model: "", models: [] };
   const chatModels = models.filter((n) => !isEmbeddingModel(n));
   const model = chatModels.length > 0 ? pickModel(chatModels) : "";
-  return { name: "Ollama", baseUrl: `${host}/v1`, model };
+  return { name: "Ollama", baseUrl: `${host}/v1`, model, models: chatModels };
 }
 
 export function invalidateOllamaCache() {

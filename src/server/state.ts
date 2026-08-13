@@ -30,6 +30,8 @@ export interface ConfigFile {
     embeddingModel?: string;
     /** Chat backend selection: "auto" (default), "local" (Ollama), "cloud" (API key). */
     backend?: ChatBackend;
+    /** Chosen local chat model (when several Ollama models are installed). */
+    ollamaModel?: string;
     apiKey?: string; // fallback only; keychain is preferred
     /** Embeddings are served from here when set (e.g. a local Ollama). */
     embeddingBaseUrl?: string;

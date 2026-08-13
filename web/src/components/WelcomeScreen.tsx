@@ -38,6 +38,9 @@ export default function WelcomeScreen() {
   const [provider, setProvider] = useState("OpenAI-compatible");
   const [baseUrl, setBaseUrl] = useState("https://api.openai.com/v1");
   const [model, setModel] = useState("");
+  const [selectedModel, setSelectedModel] = useState(
+    settings?.ai.ollamaModel ?? settings?.ai.local?.model ?? "",
+  );
   const [apiKey, setApiKey] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -83,6 +86,13 @@ export default function WelcomeScreen() {
             model: model.trim(),
           },
           aiKey: apiKey.trim() || undefined,
+        });
+      } else if (aiChoice === "ollama") {
+        await api.saveSettings({
+          ai: {
+            backend: "local",
+            ollamaModel: selectedModel || undefined,
+          },
         });
       }
       await reloadSettings();
@@ -278,8 +288,32 @@ export default function WelcomeScreen() {
                     onSelect={() => setAiChoice("ollama")}
                     icon={<Bot className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />}
                     title="Use local Ollama"
-                    subtitle={`${local.name} — ${local.model} · zero setup, no key`}
+                    subtitle={`${local.name} — ${selectedModel || local.model} · zero setup, no key`}
                   />
+                )}
+                {aiChoice === "ollama" && (local?.models?.length ?? 0) > 1 && (
+                  <div className="ml-9 mt-2 space-y-1.5">
+                    <label className={labelClass}>Choose a local model</label>
+                    {local!.models!.map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setSelectedModel(m)}
+                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border text-left text-[12.5px] transition-colors ${
+                          selectedModel === m
+                            ? "border-blue-400 bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300"
+                            : "border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-700/40"
+                        }`}
+                      >
+                        <span
+                          className={`w-3 h-3 rounded-full border-2 shrink-0 ${
+                            selectedModel === m ? "border-blue-600" : "border-stone-300 dark:border-stone-600"
+                          }`}
+                        />
+                        <span className="font-mono">{m}</span>
+                      </button>
+                    ))}
+                  </div>
                 )}
                 <ChoiceRow
                   active={aiChoice === "cloud"}
@@ -397,7 +431,7 @@ export default function WelcomeScreen() {
                     aiChoice === "skip"
                       ? "Skipped — add a model anytime in Settings (⌘,)"
                       : local?.model && aiChoice === "ollama"
-                        ? `Local — ${local.name} (${local.model})`
+                        ? `Local — ${local.name} (${selectedModel || local.model})`
                         : aiChoice === "cloud" && (apiKey.trim() || settings?.ai.hasKey)
                           ? `${provider} · ${model || "default model"}`
                           : "Will be detected automatically"

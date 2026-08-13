@@ -48,7 +48,7 @@ cd personacli
 ### 2. Install dependencies and build
 
 ```sh
-npm install
+npm install --allow-scripts=persona
 ```
 
 This installs everything and builds the server, CLI and web app for you.
@@ -61,7 +61,7 @@ npm run build
 ### 3. Install the `persona` command
 
 ```sh
-npm install -g .
+npm install -g . --allow-scripts=persona
 ```
 
 ### 4. Run it
@@ -86,8 +86,8 @@ persona path     # prints your workspace path
 ```sh
 cd personacli
 git pull
-npm install       # installs new deps and rebuilds
-npm install -g .  # update the `persona` command itself
+npm install --allow-scripts=persona       # installs new deps and rebuilds
+npm install -g . --allow-scripts=persona  # update the `persona` command itself
 ```
 
 ### Uninstalling
@@ -120,7 +120,8 @@ persona
 
 | Symptom | Fix |
 | --- | --- |
-| `persona: command not found` | `npm install -g .` again, and check `npm config get prefix` is on your `PATH` |
+| `persona: command not found` | `npm install -g . --allow-scripts=persona` again, and check `npm config get prefix` is on your `PATH` |
+| `npm warn allow-scripts` or `persona` binary missing after install | npm ≥11.16 blocks package scripts by default — install with `--allow-scripts=persona` (or run `npm config set allow-scripts=persona --location=user`) and reinstall |
 | `npm install -g .` fails with `EACCES` | Your npm prefix isn't writable — install Node via [nvm](https://github.com/nvm-sh/nvm) or [Homebrew](https://brew.sh) (or use `sudo` as a last resort) |
 | Server won't start / port errors | `persona doctor`, then check `~/.persona/logs/server.log` |
 | Chat says "no model configured" | Open **Settings → AI** (⌘,) and add a provider, or install Ollama |

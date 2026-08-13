@@ -233,6 +233,7 @@ export default function SettingsModal() {
   const [embeddingBaseUrl, setEmbeddingBaseUrl] = useState("");
   const [embeddingApiKey, setEmbeddingApiKey] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [localModel, setLocalModel] = useState("");
   const [backend, setBackend] = useState<ChatBackend>("auto");
   const [theme, setTheme] = useState<Theme>("system");
   const [accent, setAccent] = useState<string>(DEFAULT_ACCENT);
@@ -282,6 +283,7 @@ export default function SettingsModal() {
         setEmbeddingModel(settings.ai.embeddingModel);
         setEmbeddingBaseUrl(settings.ai.embeddingBaseUrl);
         setEmbeddingApiKey("");
+        setLocalModel(settings.ai.ollamaModel ?? settings.ai.local?.model ?? "");
         setBackend(settings.ai.backend ?? "auto");
         setApiKey("");
         setTheme(settings.theme ?? "system");
@@ -361,6 +363,7 @@ export default function SettingsModal() {
           embeddingModel: embeddingModel.trim(),
           backend,
           embeddingBaseUrl: embeddingBaseUrl.trim(),
+          ollamaModel: localModel || undefined,
         },
         aiKey: apiKey || undefined,
         embeddingAiKey: embeddingApiKey || undefined,
@@ -995,6 +998,36 @@ export default function SettingsModal() {
                         </>
                       )}
                     </StatusNote>
+                  )}
+
+                  {backend !== "cloud" && (settings?.ai.local?.models?.length ?? 0) > 1 && (
+                    <div>
+                      <label className={labelClass}>Local model</label>
+                      <div className="space-y-1.5">
+                        {settings!.ai.local!.models!.map((m) => (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => setLocalModel(m)}
+                            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border text-left text-[12.5px] transition-colors ${
+                              localModel === m
+                                ? "border-blue-400 bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300"
+                                : "border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-700/40"
+                            }`}
+                          >
+                            <span
+                              className={`w-3 h-3 rounded-full border-2 shrink-0 ${
+                                localModel === m ? "border-blue-600" : "border-stone-300 dark:border-stone-600"
+                              }`}
+                            />
+                            <span className="font-mono">{m}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <p className={helperClass}>
+                        Chat uses the selected local model. You can change it here anytime.
+                      </p>
+                    </div>
                   )}
 
                   <div className="grid grid-cols-2 gap-3">

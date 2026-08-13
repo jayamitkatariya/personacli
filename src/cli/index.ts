@@ -14,7 +14,7 @@ import {
   ensureConfigDir,
 } from "../server/state.js";
 import { findFreePort, isPersonaServer } from "../server/port.js";
-import { detectOllama } from "../server/ollama.js";
+import { resolveAiConfig } from "../server/ai.js";
 import type { ContextTarget, TriageSuggestion } from "../shared/types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -403,18 +403,17 @@ cli
     const up = state ? await isRunning(state.port) : false;
     console.log(`Server: ${up ? `running on :${state?.port}` : "not running"}`);
     const config = readConfig();
-    console.log(
-      `AI: ${config.ai?.model ?? "default model"} @ ${config.ai?.baseUrl ?? "https://api.openai.com/v1"}`,
-    );
-    const local = await detectOllama();
-    if (local && !local.model) {
-      console.log(`Local LLM: ${local.name} detected at ${local.baseUrl} — no models installed (run \`ollama pull llama3.2\`)`);
-    } else if (local) {
+    const ai = await resolveAiConfig();
+    const active = ai.localDetected
+      ? `${ai.provider} — ${ai.model || "no model installed"} @ ${ai.baseUrl}`
+      : ai.local
+        ? "Ollama (not running)"
+        : `${ai.provider} ${ai.model || "default model"} @ ${ai.baseUrl}`;
+    console.log(`Active AI backend: ${active}`);
+    if (ai.localDetected && config.ai?.baseUrl) {
       console.log(
-        `Local LLM: ${local.name} detected at ${local.baseUrl} (${local.model}) — will be used automatically`,
+        `Configured cloud fallback: ${config.ai.provider ?? "OpenAI-compatible"} ${config.ai.model ?? "default model"} @ ${config.ai.baseUrl}`,
       );
-    } else {
-      console.log("Local LLM: no Ollama detected — an API key is required for chat");
     }
     console.log("─────────────");
     console.log("All good." + (up ? "" : " Run `persona` to start."));

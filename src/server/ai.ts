@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import { format } from "date-fns";
 import { getApiKey } from "./keychain.js";
 import { readConfig } from "./state.js";
 import { readFileContent, readTree } from "./fs.js";
@@ -7,7 +8,7 @@ import { listTasks } from "./tasks.js";
 import { executeTool, toolDefs } from "./tools.js";
 import { detectOllama, invalidateOllamaCache } from "./ollama.js";
 import { semanticSearch } from "./embeddings.js";
-import type { ChatMessage, ChatSource, ContextTarget, ChatBackend } from "../shared/types.js";
+import type { ChatMessage, ChatSource, ContextTarget, ChatBackend, LocalAiInfo } from "../shared/types.js";
 
 export interface AiConfig {
   provider: string;
@@ -36,6 +37,12 @@ const DEFAULT_REMOTE = {
   model: "gpt-4o-mini",
 } as const;
 
+/** Pick the user's chosen local model when it's still installed, else auto. */
+function resolveLocalModel(local: LocalAiInfo | null, preferred?: string): string {
+  if (preferred && local?.models?.includes(preferred)) return preferred;
+  return local?.model ?? "";
+}
+
 /**
  * Resolve the effective AI endpoint. The user's explicit backend choice
  * ("local" = Ollama only, "cloud" = API key only) is honored; "auto" keeps the
@@ -50,7 +57,14 @@ export async function resolveAiConfig(): Promise<AiConfig> {
 
   if (backend === "local") {
     if (local) {
-      return { provider: local.name, baseUrl: local.baseUrl, model: local.model, local: true, backend, localDetected };
+      return {
+        provider: local.name,
+        baseUrl: local.baseUrl,
+        model: resolveLocalModel(local, config.ai?.ollamaModel),
+        local: true,
+        backend,
+        localDetected,
+      };
     }
     return { provider: "Ollama", baseUrl: "", model: "", local: true, backend, localDetected };
   }
@@ -68,7 +82,14 @@ export async function resolveAiConfig(): Promise<AiConfig> {
 
   // "cloud" never falls back to a local model; "auto" prefers one when found.
   if (backend !== "cloud" && local) {
-    return { provider: local.name, baseUrl: local.baseUrl, model: local.model, local: true, backend, localDetected };
+    return {
+      provider: local.name,
+      baseUrl: local.baseUrl,
+      model: resolveLocalModel(local, config.ai?.ollamaModel),
+      local: true,
+      backend,
+      localDetected,
+    };
   }
   return { ...DEFAULT_REMOTE, local: false, backend, localDetected };
 }
@@ -117,6 +138,7 @@ Rules:
 - Before overwriting an existing file with substantial content, briefly confirm what you will change.
 - Never delete or modify anything inside .persona (tasks are stored there — use the task tools instead of touching those files directly).
 - When the user pastes a screenshot or image, describe it or extract its text verbatim when asked; if you cannot see the image, say so.
+- Distinguish direct citations from inference. Say "your notes explicitly say X" only when the source states it directly; otherwise say "these entries appear related but aren't explicitly connected". Never present an inferred link as confirmed fact.
 - When you use a tool, mention what you did in one short line.`;
 
 export interface StreamOptions {
@@ -275,11 +297,14 @@ export async function streamChat(options: StreamOptions): Promise<void> {
 
   const client = new OpenAI({ apiKey, baseURL: baseUrl });
 
+  const today = format(new Date(), "EEEE, yyyy-MM-dd");
+
   const messages: ChatCompletionMessageParam[] = [
     {
       role: "system",
       content:
         SYSTEM_PROMPT +
+        `\n\nToday's date is ${today}. Use it as the current date when answering questions about due dates, overdue tasks, or day counts.` +
         (contextBlock ? `\n\nThe following context is attached to this conversation:\n${contextBlock}` : ""),
     },
     ...options.messages.slice(-24).map(toApiMessage),
