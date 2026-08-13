@@ -235,6 +235,123 @@ function computeCitations(answer: string, sources: Map<string, string>): ChatSou
   return citations;
 }
 
+export interface AgenticLoopOptions {
+  client: OpenAI;
+  model: string;
+  baseUrl: string;
+  usingLocal: boolean;
+  messages: ChatCompletionMessageParam[];
+  /** Files the loop may cite; content is matched to compute source lines. */
+  sources: Map<string, string>;
+  onDelta?: (text: string) => void;
+  onTool?: (name: string, status: "start" | "done", detail?: string) => void | Promise<void>;
+  onCitations?: (sources: ChatSource[]) => void;
+  signal?: AbortSignal;
+  maxRounds?: number;
+}
+
+/**
+ * Run the model's streaming tool loop to completion. Shared by interactive
+ * chat and background agents. Returns the accumulated answer and any citations.
+ */
+export async function runAgenticLoop(
+  options: AgenticLoopOptions,
+): Promise<{ text: string; sources: ChatSource[] }> {
+  const { client, model, baseUrl, usingLocal, messages, sources, signal } = options;
+  const maxRounds = options.maxRounds ?? MAX_TOOL_ROUNDS;
+
+  let useTools = true;
+  let fullText = "";
+
+  for (let round = 0; round < maxRounds; round++) {
+    let stream: Awaited<ReturnType<typeof client.chat.completions.create>>;
+    try {
+      stream = await client.chat.completions.create(
+        { model, stream: true, messages, tools: useTools ? toolDefs : undefined },
+        { signal },
+      );
+    } catch (err) {
+      if (signal?.aborted || (err instanceof Error && err.name === "AbortError")) {
+        throw err;
+      }
+      // Some providers (e.g. Ollama) don't support tools — fall back to plain chat.
+      if (useTools && !(err instanceof OpenAI.APIError && err.status === 401)) {
+        useTools = false;
+        round--;
+        continue;
+      }
+      if (usingLocal) {
+        invalidateOllamaCache();
+        throw new Error(
+          `Could not reach the local model server at ${baseUrl}. Is it still running?`,
+        );
+      }
+      throw new Error(errorMessage(err));
+    }
+
+    let text = "";
+    const calls = new Map<number, { id: string; name: string; args: string }>();
+
+    for await (const chunk of stream) {
+      const delta = chunk.choices?.[0]?.delta;
+      if (delta?.content) {
+        text += delta.content;
+        fullText += delta.content;
+        options.onDelta?.(delta.content);
+      }
+      if (delta?.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          const idx = tc.index ?? 0;
+          const existing = calls.get(idx) ?? { id: "", name: "", args: "" };
+          if (tc.id) existing.id = tc.id;
+          if (tc.function?.name) existing.name += tc.function.name;
+          if (tc.function?.arguments) existing.args += tc.function.arguments;
+          calls.set(idx, existing);
+        }
+      }
+    }
+
+    if (calls.size === 0) {
+      const cited = sources.size > 0 && fullText.trim().length > 0
+        ? computeCitations(fullText, sources)
+        : [];
+      if (cited.length > 0) options.onCitations?.(cited);
+      return { text: fullText, sources: cited };
+    }
+
+    const toolCalls = [...calls.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([, c], i) => ({
+        // Some providers omit the call id in streaming mode — synthesize a
+        // stable one so the tool result can be matched back.
+        id: c.id || `call_${Date.now()}_${i}`,
+        type: "function" as const,
+        function: { name: c.name, arguments: c.args || "{}" },
+      }));
+
+    messages.push({ role: "assistant", content: text || null, tool_calls: toolCalls });
+
+    for (const call of toolCalls) {
+      let result: string;
+      try {
+        await options.onTool?.(call.function.name, "start");
+        const args = JSON.parse(call.function.arguments || "{}") as Record<string, unknown>;
+        result = await executeTool(call.function.name, args);
+        if (call.function.name === "read_note" && typeof args.path === "string" && args.path) {
+          sources.set(args.path, result);
+        }
+        await options.onTool?.(call.function.name, "done", result);
+      } catch (err) {
+        result = `Error: ${err instanceof Error ? err.message : "tool failed"}`;
+        await options.onTool?.(call.function.name, "done", result);
+      }
+      messages.push({ role: "tool", tool_call_id: call.id, content: result });
+    }
+  }
+
+  throw new Error("Too many tool rounds — please try again.");
+}
+
 export async function streamChat(options: StreamOptions): Promise<void> {
   let apiKey = await getApiKey();
   const { baseUrl, model, local, backend, localDetected } = await resolveAiConfig();
@@ -310,94 +427,24 @@ export async function streamChat(options: StreamOptions): Promise<void> {
     ...options.messages.slice(-24).map(toApiMessage),
   ];
 
-  let useTools = true;
-  let fullText = "";
-
-  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    let stream: Awaited<ReturnType<typeof client.chat.completions.create>>;
-    try {
-      stream = await client.chat.completions.create(
-        { model, stream: true, messages, tools: useTools ? toolDefs : undefined },
-        { signal: options.signal },
-      );
-    } catch (err) {
-      if (options.signal?.aborted || (err instanceof Error && err.name === "AbortError")) {
-        throw err;
-      }
-      // Some providers (e.g. Ollama) don't support tools — fall back to plain chat.
-      if (useTools && !(err instanceof OpenAI.APIError && err.status === 401)) {
-        useTools = false;
-        round--;
-        continue;
-      }
-      if (usingLocal) {
-        invalidateOllamaCache();
-        throw new Error(
-          `Could not reach the local model server at ${baseUrl}. Is it still running?`,
-        );
-      }
-      throw new Error(errorMessage(err));
+  try {
+    await runAgenticLoop({
+      client,
+      model,
+      baseUrl,
+      usingLocal,
+      messages,
+      sources,
+      onDelta: options.onDelta,
+      onTool: options.onTool,
+      onCitations: options.onCitations,
+      signal: options.signal,
+    });
+    options.onDone();
+  } catch (err) {
+    if (options.signal?.aborted || (err instanceof Error && err.name === "AbortError")) {
+      throw err;
     }
-
-    let text = "";
-    const calls = new Map<number, { id: string; name: string; args: string }>();
-
-    for await (const chunk of stream) {
-      const delta = chunk.choices?.[0]?.delta;
-      if (delta?.content) {
-        text += delta.content;
-        fullText += delta.content;
-        options.onDelta(delta.content);
-      }
-      if (delta?.tool_calls) {
-        for (const tc of delta.tool_calls) {
-          const idx = tc.index ?? 0;
-          const existing = calls.get(idx) ?? { id: "", name: "", args: "" };
-          if (tc.id) existing.id = tc.id;
-          if (tc.function?.name) existing.name += tc.function.name;
-          if (tc.function?.arguments) existing.args += tc.function.arguments;
-          calls.set(idx, existing);
-        }
-      }
-    }
-
-    if (calls.size === 0) {
-      if (sources.size > 0 && fullText.trim().length > 0) {
-        options.onCitations?.(computeCitations(fullText, sources));
-      }
-      options.onDone();
-      return;
-    }
-
-    const toolCalls = [...calls.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .map(([, c], i) => ({
-        // Some providers omit the call id in streaming mode — synthesize a
-        // stable one so the tool result can be matched back.
-        id: c.id || `call_${Date.now()}_${i}`,
-        type: "function" as const,
-        function: { name: c.name, arguments: c.args || "{}" },
-      }));
-
-    messages.push({ role: "assistant", content: text || null, tool_calls: toolCalls });
-
-    for (const call of toolCalls) {
-      let result: string;
-      try {
-        options.onTool?.(call.function.name, "start");
-        const args = JSON.parse(call.function.arguments || "{}") as Record<string, unknown>;
-        result = await executeTool(call.function.name, args);
-        if (call.function.name === "read_note" && typeof args.path === "string" && args.path) {
-          sources.set(args.path, result);
-        }
-        options.onTool?.(call.function.name, "done", result);
-      } catch (err) {
-        result = `Error: ${err instanceof Error ? err.message : "tool failed"}`;
-        options.onTool?.(call.function.name, "done", result);
-      }
-      messages.push({ role: "tool", tool_call_id: call.id, content: result });
-    }
+    options.onError(err instanceof Error ? err.message : "Unknown error");
   }
-
-  options.onError("Too many tool rounds — please try again.");
 }

@@ -20,10 +20,14 @@ import {
   FileQuestion,
   SquareCheck,
   MessageCircle,
+  Timer,
+  BookOpen,
+  Bot,
 } from "lucide-react";
 import { useStore, type View } from "../state/store";
-import type { TreeNode } from "../../../src/shared/types";
+import type { ModuleKey, TreeNode } from "../../../src/shared/types";
 import FileTree from "./FileTree";
+import JournalModule from "./JournalModule";
 
 const MIN_SIDEBAR_WIDTH = 180;
 const MAX_SIDEBAR_WIDTH = 420;
@@ -147,6 +151,8 @@ export default function Sidebar() {
         </div>
       </div>
 
+      <ModuleNav />
+
       <PinboardSection />
 
       <div className="flex-1 min-h-0 overflow-y-auto">
@@ -172,6 +178,50 @@ export default function Sidebar() {
         </button>
       </div>
     </aside>
+  );
+}
+
+/* -------------------------------------------------------------------- */
+/* Module nav (toggleable sidebar surfaces)                              */
+/* -------------------------------------------------------------------- */
+
+const MODULE_DEFS: { key: ModuleKey; icon: typeof Timer; label: string; view: View | null }[] = [
+  { key: "focus", icon: Timer, label: "Focus", view: null },
+  { key: "today", icon: Sunrise, label: "Today", view: "today" },
+  { key: "agents", icon: Bot, label: "Agents", view: "agents" },
+];
+
+function ModuleNav() {
+  const modules = useStore((s) => s.modules);
+  const setView = useStore((s) => s.setView);
+  const openFocus = useStore((s) => s.openFocus);
+
+  const hasJournal = modules.journal !== false;
+  const visible = MODULE_DEFS.filter((m) => modules[m.key] !== false);
+
+  if (visible.length === 0 && !hasJournal) return null;
+
+  return (
+    <div className="px-2 pb-2 shrink-0 border-b border-stone-200/80 dark:border-stone-800">
+      {hasJournal && <JournalModule />}
+      {visible.length > 0 && (
+        <div className="space-y-0.5 pt-1.5">
+          {visible.map((m) => {
+            const Icon = m.icon;
+            return (
+              <button
+                key={m.key}
+                onClick={() => (m.view ? setView(m.view) : openFocus())}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[12.5px] text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-700/60"
+              >
+                <Icon className="w-3.5 h-3.5 text-stone-400 dark:text-stone-500 shrink-0" strokeWidth={1.8} />
+                <span className="text-left">{m.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 

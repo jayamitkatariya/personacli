@@ -1,3 +1,45 @@
+export type ModuleKey = "focus" | "journal" | "today" | "agents";
+export type ModuleSettings = Partial<Record<ModuleKey, boolean>>;
+
+export type AgentStatus = "queued" | "running" | "done" | "failed" | "cancelled";
+
+export interface AgentStep {
+  name: string;
+  status: "start" | "done";
+  detail?: string;
+  at: number;
+}
+
+export interface AgentRun {
+  id: string;
+  prompt: string;
+  status: AgentStatus;
+  /** Final answer text when done. */
+  result: string;
+  error: string | null;
+  steps: AgentStep[];
+  /** Optional file/folder/tasks context attached to the prompt. */
+  contexts?: ContextTarget[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type ImportSource = "obsidian" | "bear" | "roam" | "notion" | "plain";
+
+export interface ImportPreview {
+  source: ImportSource;
+  notes: number;
+  attachments: number;
+  /** First few target-relative paths for the confirmation UI. */
+  sample: string[];
+}
+
+export interface ImportResult {
+  notes: number;
+  attachments: number;
+  created: string[];
+}
+
 export type NodeType = "file" | "folder";
 
 /** How a file should be displayed in the workspace. */
@@ -106,6 +148,8 @@ export interface Settings {
   /** Font family, prose serif, size, density and ligatures. */
   typography?: TypographySettings;
   ai: AiSettings;
+  /** Toggleable sidebar modules. Missing keys fall back to defaults. */
+  modules: ModuleSettings;
 }
 
 export type FontFamily = "inter" | "plex" | "system";
@@ -141,6 +185,7 @@ export interface SettingsInput {
   aiKey?: string;
   /** Separate key for the embeddings endpoint (empty string clears it). */
   embeddingAiKey?: string;
+  modules?: ModuleSettings;
 }
 
 export type ContextTarget =
@@ -224,7 +269,8 @@ export type ServerEvent =
   | { type: "tasks" }
   | { type: "chats" }
   | { type: "settings" }
-  | { type: "pins" };
+  | { type: "pins" }
+  | { type: "agents" };
 
 /** App-lock preferences. The PIN itself lives in the OS keychain. */
 export interface LockSettings {

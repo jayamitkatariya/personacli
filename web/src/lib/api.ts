@@ -1,4 +1,5 @@
 import type {
+  AgentRun,
   ChatMessage,
   ChatMeta,
   ChatSearchHit,
@@ -6,6 +7,9 @@ import type {
   ChatTranscript,
   ContextItem,
   ContextTarget,
+  ImportPreview,
+  ImportResult,
+  ImportSource,
   LockSettings,
   ParsedTask,
   Pinboard,
@@ -77,6 +81,12 @@ export const api = {
 
   journalAppend: (text: string) =>
     request<{ ok: boolean }>("/api/journal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    }),
+  capture: (text: string) =>
+    request<{ path: string }>("/api/capture", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
@@ -255,6 +265,34 @@ export const api = {
     const scope = project ? `-${project.replace(/[^a-z0-9-]+/gi, "-")}` : "";
     return downloadExport("/api/export/tasks", { format, project }, `tasks${scope}-${today}.${format}`);
   },
+
+  agents: () => request<AgentRun[]>("/api/agents"),
+  getAgent: (id: string) => request<AgentRun>(`/api/agents/${id}`),
+  createAgent: (prompt: string, contexts: ContextTarget[] = []) =>
+    request<AgentRun>("/api/agents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, contexts }),
+    }),
+  cancelAgent: (id: string) =>
+    request<AgentRun>(`/api/agents/${id}/cancel`, { method: "POST" }),
+  retryAgent: (id: string) =>
+    request<AgentRun>(`/api/agents/${id}/retry`, { method: "POST" }),
+  deleteAgent: (id: string) =>
+    request<{ ok: boolean }>(`/api/agents/${id}`, { method: "DELETE" }),
+
+  importPreview: (source: ImportSource, path: string) =>
+    request<ImportPreview>("/api/import/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source, path }),
+    }),
+  importRun: (source: ImportSource, path: string) =>
+    request<ImportResult>("/api/import/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source, path }),
+    }),
 };
 
 export type ChatStreamEvents =

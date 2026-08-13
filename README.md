@@ -168,8 +168,15 @@ appear in the sidebar untouched, and the welcome note is only created once.
 ├── Projects/
 │   └── my-project/
 │       └── PRD.md
+├── Imported/               ← notes brought in from other apps
+│   ├── obsidian/
+│   ├── bear/
+│   ├── roam/
+│   ├── notion/
+│   └── plain/
 └── .persona/
     ├── tasks/              ← tasks are Markdown files with frontmatter
+    ├── agents/             ← background agent runs (JSON)
     ├── pins.json           ← your pinboard (pinned notes & tasks)
     └── embeddings/         ← local semantic-search index (notes, not secrets)
 ```
@@ -215,12 +222,22 @@ syncs automatically.
   The AI can also create, edit, move and delete notes and folders, and
   create, complete, update and delete tasks on your behalf — you'll see a
   small status chip for each action it takes.
+- **Agents** — background AI runs for multi-step work. Give Persona a task
+  like "organize my inbox notes" and it works through it with tools, live,
+  without holding a chat open. Runs are persisted under
+  `.persona/agents/` and can be cancelled, retried, or deleted.
 - **Semantic search** — your notes are embedded locally and searched by
   meaning, so "that thing I wrote about camping" finds the note that mentions
   the forest, the tent, and the rain — even if it never says "camping".
   It powers the command palette (⌘P), `persona search`, and the chat: when
   you don't attach context, the assistant automatically pulls in the notes
   most relevant to your question and cites them.
+- **Modules** — Focus, Journal, Today's Stuff, and Agents are toggleable from
+  **Settings → Modules**; enabled modules show in the sidebar, disabled ones
+  stay reachable from ⌘K.
+- **Import** — bring in Obsidian, Bear, Roam, Notion, or plain-folder exports
+  from **Settings → Import**. Everything lands under `Imported/<source>/` and
+  never overwrites existing notes.
 
 ## Keyboard
 

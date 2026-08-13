@@ -1,9 +1,12 @@
 import { create } from "zustand";
 import type {
+  AgentRun,
   ChatMessage,
   ChatMeta,
   ChatSource,
+  ContextTarget,
   FileKind,
+  ModuleSettings,
   Pinboard,
   Settings,
   Task,
@@ -12,7 +15,7 @@ import type {
 import { fileKind } from "../../../src/shared/types";
 import { api } from "../lib/api";
 
-export type View = "write" | "tasks" | "chat" | "today";
+export type View = "write" | "tasks" | "chat" | "today" | "agents";
 export type SaveStatus = "saved" | "saving" | "unsaved" | "conflict";
 export type SidebarTab = "code" | "edit" | "profile";
 
@@ -75,6 +78,8 @@ interface Store {
   confettiCount: number;
   focusOpen: boolean;
   focusSession: FocusSession | null;
+  modules: ModuleSettings;
+  agents: AgentRun[];
 
   boot: () => Promise<void>;
   refreshTree: () => Promise<void>;
@@ -84,6 +89,12 @@ interface Store {
   reloadSettings: () => Promise<void>;
   createDraft: () => Promise<void>;
   finishOnboarding: () => void;
+  setModules: (patch: ModuleSettings) => Promise<void>;
+  refreshAgents: () => Promise<void>;
+  createAgent: (prompt: string, contexts?: ContextTarget[]) => Promise<void>;
+  cancelAgent: (id: string) => Promise<void>;
+  retryAgent: (id: string) => Promise<void>;
+  deleteAgent: (id: string) => Promise<void>;
 
   setView: (view: View) => void;
   toggleExpand: (path: string) => void;
@@ -173,6 +184,8 @@ export const useStore = create<Store>((set, get) => ({
   confettiCount: 0,
   focusOpen: false,
   focusSession: null,
+  modules: {},
+  agents: [],
 
   boot: async () => {
     const settings = await api.getSettings().catch(() => null);
@@ -181,12 +194,14 @@ export const useStore = create<Store>((set, get) => ({
       configured: Boolean(settings?.configured),
       onboarding: !Boolean(settings?.configured),
       booted: true,
+      modules: settings?.modules ?? {},
     });
     if (settings?.configured) {
       get().refreshTree();
       get().refreshTasks();
       get().refreshPins();
       get().refreshChats();
+      get().refreshAgents();
     }
   },
 
@@ -219,6 +234,36 @@ export const useStore = create<Store>((set, get) => ({
     set({ chats });
   },
 
+  refreshAgents: async () => {
+    const agents = await api.agents().catch(() => []);
+    set({ agents });
+  },
+
+  setModules: async (patch) => {
+    await api.saveSettings({ modules: patch }).catch(() => {});
+    await get().reloadSettings();
+  },
+
+  createAgent: async (prompt, contexts = []) => {
+    await api.createAgent(prompt, contexts).catch(() => {});
+    await get().refreshAgents();
+  },
+
+  cancelAgent: async (id) => {
+    await api.cancelAgent(id).catch(() => {});
+    await get().refreshAgents();
+  },
+
+  retryAgent: async (id) => {
+    await api.retryAgent(id).catch(() => {});
+    await get().refreshAgents();
+  },
+
+  deleteAgent: async (id) => {
+    await api.deleteAgent(id).catch(() => {});
+    await get().refreshAgents();
+  },
+
   reloadSettings: async () => {
     const prev = get().settings;
     const prevWorkspace = prev?.workspace ?? null;
@@ -233,6 +278,7 @@ export const useStore = create<Store>((set, get) => ({
       settings,
       configured: Boolean(settings?.configured),
       tree: settings?.configured ? get().tree : [],
+      modules: settings?.modules ?? {},
       // A different workspace means every open tab points at another
       // workspace's files — close them all rather than editing the wrong tree.
       docs: prevWorkspace && nextWorkspace && prevWorkspace !== nextWorkspace ? [] : get().docs,
@@ -249,7 +295,7 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   setView: (view) => {
-    const tabMap = { chat: "code", write: "edit", tasks: "profile", today: "code" } as const;
+    const tabMap = { chat: "code", write: "edit", tasks: "profile", today: "code", agents: "code" } as const;
     set({ view, sidebarTab: tabMap[view] });
   },
 

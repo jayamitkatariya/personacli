@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import type { ChatBackend, Density, FontFamily } from "../shared/types.js";
+import type { ChatBackend, Density, FontFamily, ModuleKey } from "../shared/types.js";
 
 export type ThemeSetting = "light" | "dark" | "system";
 
@@ -23,6 +23,7 @@ export interface ConfigFile {
     /** Fallback when the OS keychain is unavailable (sha-256 hex). */
     pinHash?: string;
   };
+  modules?: Partial<Record<ModuleKey, boolean>>;
   ai?: {
     provider?: string;
     baseUrl?: string;
