@@ -120,6 +120,7 @@ app.get("/api/settings", async (c) => {
       embeddingHasKey: await hasEmbeddingApiKey(),
       embeddingLocal: await detectOllamaEmbedding(),
       local: await detectOllama(),
+      ollamaModel: config.ai?.ollamaModel,
     },
   };
   return c.json(settings);
@@ -144,6 +145,7 @@ app.put("/api/settings", async (c) => {
       embeddingModel?: string;
       backend?: "auto" | "local" | "cloud";
       embeddingBaseUrl?: string;
+      ollamaModel?: string;
     };
     aiKey?: string;
     embeddingAiKey?: string;
@@ -215,6 +217,9 @@ app.put("/api/settings", async (c) => {
       embeddingBaseUrl: embeddingBaseUrl === undefined
         ? config.ai?.embeddingBaseUrl
         : embeddingBaseUrl || undefined,
+      ollamaModel: typeof body.ai.ollamaModel === "string" && body.ai.ollamaModel.trim()
+        ? body.ai.ollamaModel.trim()
+        : config.ai?.ollamaModel,
     };
     writeConfig(config);
     invalidateOllamaCache();

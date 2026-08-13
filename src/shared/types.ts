@@ -66,6 +66,8 @@ export interface LocalAiInfo {
   name: string;
   baseUrl: string;
   model: string;
+  /** All installed chat models (embedding models excluded). */
+  models?: string[];
 }
 
 /**
@@ -90,6 +92,8 @@ export interface AiSettings {
   embeddingLocal: { baseUrl: string; model: string } | null;
   /** Set when a local LLM is running and can be used with zero setup. */
   local: LocalAiInfo | null;
+  /** The user's chosen local chat model, when it differs from auto-detection. */
+  ollamaModel?: string;
 }
 
 export interface Settings {
