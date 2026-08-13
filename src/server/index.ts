@@ -43,16 +43,40 @@ import { transcribeAudio } from "./stt.js";
 import { deleteChat, getChat, listChats, saveChat, searchChats } from "./chats.js";
 import { getLockSettings, updateLockSettings, verifyPin } from "./lock.js";
 import { streamTransform, TRANSFORM_MODES } from "./transform.js";
+import {
+  cancelAgent,
+  deleteAgent,
+  getAgent,
+  listAgents,
+  reconcileInterruptedRuns,
+  retryAgent,
+  startAgent,
+} from "./agents.js";
+import { previewImport, runImport } from "./import.js";
 import { DEFAULT_TYPOGRAPHY } from "../shared/types.js";
 import type {
   ContextItem,
   ContextTarget,
   Density,
   FontFamily,
+  ImportSource,
   LockSettings,
+  ModuleKey,
+  ModuleSettings,
   Settings,
   TransformMode,
 } from "../shared/types.js";
+
+const DEFAULT_MODULES: ModuleSettings = {
+  focus: true,
+  journal: true,
+  today: true,
+  agents: false,
+};
+
+function mergeModules(configured?: Partial<Record<ModuleKey, boolean>>): ModuleSettings {
+  return { ...DEFAULT_MODULES, ...(configured ?? {}) };
+}
 
 const app = new Hono();
 
@@ -64,7 +88,7 @@ app.onError((err, c) => {
   return c.json({ error: "Internal error" }, 500);
 });
 
-app.get("/api/health", (c) => c.json({ app: "persona", version: "0.1.0", ok: true }));
+app.get("/api/health", (c) => c.json({ app: "persona", version: "0.2.0", ok: true }));
 
 app.post("/api/stt/transcribe", async (c) => {
   const form = await c.req.formData().catch(() => null);
@@ -122,6 +146,7 @@ app.get("/api/settings", async (c) => {
       local: await detectOllama(),
       ollamaModel: config.ai?.ollamaModel,
     },
+    modules: mergeModules(config.modules),
   };
   return c.json(settings);
 });
@@ -149,6 +174,7 @@ app.put("/api/settings", async (c) => {
     };
     aiKey?: string;
     embeddingAiKey?: string;
+    modules?: ModuleSettings;
   };
 
   const config = readConfig();
@@ -246,6 +272,13 @@ app.put("/api/settings", async (c) => {
       await setApiKey(body.aiKey);
       void rebuildSemanticIndex();
     }
+    broadcaster.emitEvent({ type: "settings" });
+  }
+
+  if (body.modules && typeof body.modules === "object") {
+    const merged = mergeModules({ ...config.modules, ...body.modules });
+    config.modules = merged;
+    writeConfig(config);
     broadcaster.emitEvent({ type: "settings" });
   }
 
@@ -782,6 +815,100 @@ app.delete("/api/pins", async (c) => {
   return c.json({ ok: true });
 });
 
+/* ------------------------------------------------------------------ */
+/* Background agents                                                    */
+/* ------------------------------------------------------------------ */
+
+app.get("/api/agents", async (c) => {
+  if (!getWorkspace()) return c.json({ error: "Workspace not configured" }, 503);
+  return c.json(await listAgents());
+});
+
+app.post("/api/agents", async (c) => {
+  if (!getWorkspace()) return c.json({ error: "Workspace not configured" }, 503);
+  const body = (await c.req.json().catch(() => ({}))) as {
+    prompt?: unknown;
+    contexts?: ContextTarget[];
+  };
+  const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+  if (!prompt) return c.json({ error: "Bad request" }, 400);
+  const contexts = Array.isArray(body.contexts)
+    ? body.contexts.filter(
+        (c): c is ContextTarget =>
+          !!c &&
+          (c.type === "file" || c.type === "folder" || c.type === "tasks"),
+      )
+    : [];
+  return c.json(await startAgent(prompt, contexts));
+});
+
+app.get("/api/agents/:id", async (c) => {
+  const agent = await getAgent(c.req.param("id"));
+  if (!agent) return c.json({ error: "Agent not found" }, 404);
+  return c.json(agent);
+});
+
+app.post("/api/agents/:id/cancel", async (c) => {
+  const agent = await cancelAgent(c.req.param("id"));
+  if (!agent) return c.json({ error: "Agent not found" }, 404);
+  return c.json(agent);
+});
+
+app.post("/api/agents/:id/retry", async (c) => {
+  const agent = await retryAgent(c.req.param("id"));
+  if (!agent) return c.json({ error: "Agent not found" }, 404);
+  return c.json(agent);
+});
+
+app.delete("/api/agents/:id", async (c) => {
+  const ok = await deleteAgent(c.req.param("id"));
+  if (!ok) return c.json({ error: "Agent not found" }, 404);
+  broadcaster.emitEvent({ type: "agents" });
+  return c.json({ ok: true });
+});
+
+/* ------------------------------------------------------------------ */
+/* Importers                                                            */
+/* ------------------------------------------------------------------ */
+
+const IMPORT_SOURCES: ImportSource[] = ["obsidian", "bear", "roam", "notion", "plain"];
+
+function isImportSource(value: unknown): value is ImportSource {
+  return typeof value === "string" && IMPORT_SOURCES.includes(value as ImportSource);
+}
+
+app.post("/api/import/preview", async (c) => {
+  if (!getWorkspace()) return c.json({ error: "Workspace not configured" }, 503);
+  const body = (await c.req.json().catch(() => ({}))) as {
+    source?: unknown;
+    path?: unknown;
+  };
+  if (!isImportSource(body.source) || typeof body.path !== "string" || !body.path.trim()) {
+    return c.json({ error: "Bad request" }, 400);
+  }
+  try {
+    return c.json(await previewImport(body.source, body.path));
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : "Import preview failed" }, 400);
+  }
+});
+
+app.post("/api/import/run", async (c) => {
+  if (!getWorkspace()) return c.json({ error: "Workspace not configured" }, 503);
+  const body = (await c.req.json().catch(() => ({}))) as {
+    source?: unknown;
+    path?: unknown;
+  };
+  if (!isImportSource(body.source) || typeof body.path !== "string" || !body.path.trim()) {
+    return c.json({ error: "Bad request" }, 400);
+  }
+  try {
+    return c.json(await runImport(body.source, body.path));
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : "Import failed" }, 400);
+  }
+});
+
 app.post("/api/chat/stream", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
     messages?: { role: "user" | "assistant"; content: string; images?: string[] }[];
@@ -930,6 +1057,7 @@ function listenOnce(p: number): Promise<Awaited<ReturnType<typeof serve>>> {
         writeState({ port: info.port, pid: process.pid, startedAt: Date.now() });
         writePidFile();
         startWatcher();
+        void reconcileInterruptedRuns();
         void rebuildIndex();
         void loadSemanticIndex().then(() => {
           void rebuildSemanticIndex();

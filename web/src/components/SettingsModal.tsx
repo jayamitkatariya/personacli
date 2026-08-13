@@ -23,13 +23,15 @@ import {
   Settings,
   Loader,
   Trash2,
+  Boxes,
+  DownloadCloud,
 } from "lucide-react";
 import { useStore } from "../state/store";
 import { api } from "../lib/api";
 import { setSoundsEnabled, soundsEnabled, sounds } from "../lib/sounds";
 import { ACCENT_PRESETS, DEFAULT_ACCENT, applyAccent, normalizeAccent } from "../lib/accent";
 import { applyTypography } from "../lib/typography";
-import type { ChatBackend, Density, FontFamily, LockSettings, TypographySettings } from "../../../src/shared/types";
+import type { ChatBackend, Density, FontFamily, ImportPreview, ImportSource, LockSettings, ModuleKey, TypographySettings } from "../../../src/shared/types";
 import { DEFAULT_TYPOGRAPHY } from "../../../src/shared/types";
 
 type Theme = "light" | "dark" | "system";
@@ -93,6 +95,20 @@ const TABS = [
     icon: Sparkles,
     title: "AI",
     description: "Chat backend, models and embeddings.",
+  },
+  {
+    value: "modules",
+    label: "Modules",
+    icon: Boxes,
+    title: "Modules",
+    description: "Choose which surfaces appear in the sidebar.",
+  },
+  {
+    value: "import",
+    label: "Import",
+    icon: DownloadCloud,
+    title: "Import",
+    description: "Bring notes in from other apps.",
   },
 ] as const;
 
@@ -248,6 +264,12 @@ export default function SettingsModal() {
   const [reindexing, setReindexing] = useState(false);
   const [reindexInfo, setReindexInfo] = useState("");
   const [soundsOn, setSoundsOn] = useState(true);
+  const [importSource, setImportSource] = useState<ImportSource>("obsidian");
+  const [importPath, setImportPath] = useState("");
+  const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
+  const [importResult, setImportResult] = useState<string | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -481,6 +503,53 @@ export default function SettingsModal() {
       return;
     }
     void saveLock({ pin });
+  };
+
+  const pickImportPath = async () => {
+    setImportError(null);
+    try {
+      const { path } = await api.pickFolder();
+      if (path) setImportPath(path);
+    } catch (e) {
+      setImportError((e as Error).message);
+    }
+  };
+
+  const doPreview = async () => {
+    if (!importPath.trim()) return;
+    setImportBusy(true);
+    setImportError(null);
+    setImportPreview(null);
+    setImportResult(null);
+    try {
+      setImportPreview(await api.importPreview(importSource, importPath.trim()));
+    } catch (e) {
+      setImportError((e as Error).message);
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const doImport = async () => {
+    if (!importPath.trim()) return;
+    setImportBusy(true);
+    setImportError(null);
+    setImportResult(null);
+    try {
+      const result = await api.importRun(importSource, importPath.trim());
+      setImportResult(`Imported ${result.notes} notes and ${result.attachments} attachments.`);
+      setImportPreview(null);
+      await reloadSettings();
+      useStore.getState().refreshTree();
+    } catch (e) {
+      setImportError((e as Error).message);
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const toggleModule = (key: ModuleKey, value: boolean) => {
+    void useStore.getState().setModules({ [key]: value });
   };
 
   const armConfirm = (setter: (v: boolean) => void) => {
@@ -1217,6 +1286,121 @@ export default function SettingsModal() {
                         {confirmRemoveKey ? "Click again to confirm" : "Remove stored API key"}
                       </button>
                     )}
+                  </div>
+                </Tabs.Content>
+
+                <Tabs.Content value="modules" className="space-y-4 max-w-[430px]">
+                  {(
+                    [
+                      { key: "focus", title: "Focus timer", desc: "A shortcut to start a focus session." },
+                      { key: "journal", title: "Journal", desc: "Quick-capture lines straight into today's note." },
+                      { key: "today", title: "Today's Stuff", desc: "A daily planning view for due tasks." },
+                      { key: "agents", title: "Agents", desc: "Background AI runs for multi-step tasks." },
+                    ] as { key: ModuleKey; title: string; desc: string }[]
+                  ).map((m) => (
+                    <div key={m.key} className="flex items-center justify-between gap-4">
+                      <div>
+                        <p className="text-[12px] font-medium text-stone-700 dark:text-stone-300">{m.title}</p>
+                        <p className={subClass}>{m.desc}</p>
+                      </div>
+                      <Toggle
+                        checked={settings?.modules?.[m.key] !== false}
+                        onChange={(v) => toggleModule(m.key, v)}
+                        ariaLabel={m.title}
+                      />
+                    </div>
+                  ))}
+                  <p className={helperClass}>
+                    Disabled modules are hidden from the sidebar but stay available from ⌘K.
+                  </p>
+                </Tabs.Content>
+
+                <Tabs.Content value="import" className="space-y-5 max-w-[430px]">
+                  <div>
+                    <label className={labelClass}>Source format</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(
+                        [
+                          { value: "obsidian", label: "Obsidian" },
+                          { value: "bear", label: "Bear" },
+                          { value: "roam", label: "Roam" },
+                          { value: "notion", label: "Notion" },
+                          { value: "plain", label: "Plain folder" },
+                        ] as { value: ImportSource; label: string }[]
+                      ).map((s) => (
+                        <button
+                          type="button"
+                          key={s.value}
+                          onClick={() => setImportSource(s.value)}
+                          className={`px-3 py-2 rounded-lg border text-[12px] transition-colors ${
+                            importSource === s.value
+                              ? "border-blue-400 bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300"
+                              : "border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-700/40"
+                          }`}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className={labelClass}>Source folder or .zip</label>
+                    <div className="flex gap-2">
+                      <input
+                        value={importPath}
+                        onChange={(e) => setImportPath(e.target.value)}
+                        placeholder="/path/to/export"
+                        className={inputClass}
+                      />
+                      <button type="button" onClick={() => void pickImportPath()} className={secondaryBtnClass}>
+                        Choose
+                      </button>
+                    </div>
+                    <p className={helperClass}>
+                      Imports land under <span className="font-mono">Imported/{importSource}/</span> and never
+                      overwrite existing notes.
+                    </p>
+                  </div>
+
+                  {importPreview && (
+                    <div className="rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 p-3.5">
+                      <p className="text-[12.5px] font-medium text-stone-700 dark:text-stone-300">
+                        {importPreview.notes} notes · {importPreview.attachments} attachments
+                      </p>
+                      {importPreview.sample.length > 0 && (
+                        <div className="mt-1.5 space-y-0.5">
+                          {importPreview.sample.map((s) => (
+                            <p key={s} className="font-mono text-[11px] text-stone-500 dark:text-stone-400 truncate">
+                              {s}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {importResult && <p className="text-[12px] text-emerald-600">{importResult}</p>}
+                  {importError && <p className="text-[12px] text-red-600">{importError}</p>}
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void doPreview()}
+                      disabled={importBusy || !importPath.trim()}
+                      className={secondaryBtnClass}
+                    >
+                      Preview
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void doImport()}
+                      disabled={importBusy || !importPath.trim()}
+                      className={primaryBtnClass}
+                    >
+                      {importBusy ? <Loader className="w-3.5 h-3.5 animate-spin" /> : null}
+                      Import
+                    </button>
                   </div>
                 </Tabs.Content>
               </div>
