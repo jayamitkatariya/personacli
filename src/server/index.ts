@@ -43,18 +43,12 @@ import { transcribeAudio } from "./stt.js";
 import { deleteChat, getChat, listChats, saveChat, searchChats } from "./chats.js";
 import { getLockSettings, updateLockSettings, verifyPin } from "./lock.js";
 import { streamTransform, TRANSFORM_MODES } from "./transform.js";
-import {
-  cancelAgent,
-  deleteAgent,
-  getAgent,
-  listAgents,
-  reconcileInterruptedRuns,
-  retryAgent,
-  startAgent,
-} from "./agents.js";
 import { previewImport, runImport } from "./import.js";
+import { cancelChatJob, enqueueChatMessage, reconcileInterruptedChatJobs, retryChatJob } from "./chat-jobs.js";
+import { getProfileApiKey, hasProfileApiKey, setProfileApiKey } from "./keychain.js";
 import { DEFAULT_TYPOGRAPHY } from "../shared/types.js";
 import type {
+  AiModelProfile,
   ContextItem,
   ContextTarget,
   Density,
@@ -71,7 +65,6 @@ const DEFAULT_MODULES: ModuleSettings = {
   focus: true,
   journal: true,
   today: true,
-  agents: false,
 };
 
 function mergeModules(configured?: Partial<Record<ModuleKey, boolean>>): ModuleSettings {
@@ -124,6 +117,21 @@ app.post("/api/journal", async (c) => {
 app.get("/api/settings", async (c) => {
   const config = readConfig();
   const ai = await resolveAiConfig();
+  const rawProfiles = config.ai?.profiles ?? [];
+  const profiles: AiModelProfile[] = await Promise.all(
+    rawProfiles.map(async (p) => {
+      const baseUrl = p.baseUrl ?? "https://api.openai.com/v1";
+      const isLocal = baseUrl.includes("127.0.0.1") || baseUrl.includes("localhost");
+      return {
+        id: p.id,
+        label: p.label,
+        provider: p.provider ?? "OpenAI-compatible",
+        baseUrl,
+        model: p.model ?? "gpt-4o-mini",
+        hasKey: isLocal ? true : await hasProfileApiKey(p.id),
+      };
+    }),
+  );
   const settings: Settings = {
     configured: Boolean(config.workspace),
     workspace: config.workspace ?? "",
@@ -145,6 +153,9 @@ app.get("/api/settings", async (c) => {
       embeddingLocal: await detectOllamaEmbedding(),
       local: await detectOllama(),
       ollamaModel: config.ai?.ollamaModel,
+      profiles,
+      defaultModelId: config.ai?.defaultModelId ?? null,
+      backupModelId: config.ai?.backupModelId ?? null,
     },
     modules: mergeModules(config.modules),
   };
@@ -171,9 +182,13 @@ app.put("/api/settings", async (c) => {
       backend?: "auto" | "local" | "cloud";
       embeddingBaseUrl?: string;
       ollamaModel?: string;
+      profiles?: Array<{ id: string; label: string; provider?: string; baseUrl?: string; model?: string }>;
+      defaultModelId?: string | null;
+      backupModelId?: string | null;
     };
     aiKey?: string;
     embeddingAiKey?: string;
+    profileKeys?: Record<string, string>;
     modules?: ModuleSettings;
   };
 
@@ -232,6 +247,12 @@ app.put("/api/settings", async (c) => {
   if (body.ai) {
     const backend = body.ai.backend;
     const embeddingBaseUrl = body.ai.embeddingBaseUrl?.trim();
+    const profiles = Array.isArray(body.ai.profiles)
+      ? body.ai.profiles
+          .filter((p) => p && typeof p.id === "string" && typeof p.label === "string")
+          .map((p) => ({ id: p.id.trim(), label: p.label.trim(), provider: p.provider?.trim(), baseUrl: p.baseUrl?.trim(), model: p.model?.trim() }))
+          .filter((p) => p.id && p.label)
+      : undefined;
     config.ai = {
       provider: body.ai.provider ?? config.ai?.provider,
       baseUrl: body.ai.baseUrl ?? config.ai?.baseUrl,
@@ -246,9 +267,25 @@ app.put("/api/settings", async (c) => {
       ollamaModel: typeof body.ai.ollamaModel === "string" && body.ai.ollamaModel.trim()
         ? body.ai.ollamaModel.trim()
         : config.ai?.ollamaModel,
+      profiles: profiles ?? config.ai?.profiles,
+      defaultModelId: body.ai.defaultModelId !== undefined ? body.ai.defaultModelId : config.ai?.defaultModelId ?? null,
+      backupModelId: body.ai.backupModelId !== undefined ? body.ai.backupModelId : config.ai?.backupModelId ?? null,
     };
     writeConfig(config);
     invalidateOllamaCache();
+    broadcaster.emitEvent({ type: "settings" });
+  }
+
+  if (body.profileKeys && typeof body.profileKeys === "object") {
+    for (const [id, key] of Object.entries(body.profileKeys)) {
+      if (typeof key !== "string") continue;
+      if (key === "") {
+        const { clearProfileApiKey } = await import("./keychain.js");
+        await clearProfileApiKey(id);
+      } else {
+        await setProfileApiKey(id, key);
+      }
+    }
     broadcaster.emitEvent({ type: "settings" });
   }
 
@@ -816,55 +853,43 @@ app.delete("/api/pins", async (c) => {
 });
 
 /* ------------------------------------------------------------------ */
-/* Background agents                                                    */
+/* Chat background queue                                                  */
 /* ------------------------------------------------------------------ */
 
-app.get("/api/agents", async (c) => {
+app.post("/api/chats/:id/messages", async (c) => {
   if (!getWorkspace()) return c.json({ error: "Workspace not configured" }, 503);
-  return c.json(await listAgents());
-});
-
-app.post("/api/agents", async (c) => {
-  if (!getWorkspace()) return c.json({ error: "Workspace not configured" }, 503);
+  const chatId = c.req.param("id");
   const body = (await c.req.json().catch(() => ({}))) as {
-    prompt?: unknown;
+    content?: unknown;
     contexts?: ContextTarget[];
+    images?: string[];
   };
-  const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
-  if (!prompt) return c.json({ error: "Bad request" }, 400);
+  const content = typeof body.content === "string" ? body.content.trim() : "";
   const contexts = Array.isArray(body.contexts)
     ? body.contexts.filter(
-        (c): c is ContextTarget =>
-          !!c &&
-          (c.type === "file" || c.type === "folder" || c.type === "tasks"),
+        (x): x is ContextTarget => !!x && (x.type === "file" || x.type === "folder" || x.type === "tasks"),
       )
     : [];
-  return c.json(await startAgent(prompt, contexts));
+  const images = Array.isArray(body.images) ? body.images.filter((x): x is string => typeof x === "string") : undefined;
+  if (!content && (!images || images.length === 0)) return c.json({ error: "Bad request" }, 400);
+  if (!/^[a-z0-9-]+$/.test(chatId)) return c.json({ error: "Bad request" }, 400);
+  return c.json(await enqueueChatMessage(chatId, content, contexts, images));
 });
 
-app.get("/api/agents/:id", async (c) => {
-  const agent = await getAgent(c.req.param("id"));
-  if (!agent) return c.json({ error: "Agent not found" }, 404);
-  return c.json(agent);
+app.post("/api/chats/:id/jobs/:jobId/cancel", async (c) => {
+  const chatId = c.req.param("id");
+  const jobId = c.req.param("jobId");
+  const result = await cancelChatJob(chatId, jobId);
+  if (!result) return c.json({ error: "Job not found" }, 404);
+  return c.json(result);
 });
 
-app.post("/api/agents/:id/cancel", async (c) => {
-  const agent = await cancelAgent(c.req.param("id"));
-  if (!agent) return c.json({ error: "Agent not found" }, 404);
-  return c.json(agent);
-});
-
-app.post("/api/agents/:id/retry", async (c) => {
-  const agent = await retryAgent(c.req.param("id"));
-  if (!agent) return c.json({ error: "Agent not found" }, 404);
-  return c.json(agent);
-});
-
-app.delete("/api/agents/:id", async (c) => {
-  const ok = await deleteAgent(c.req.param("id"));
-  if (!ok) return c.json({ error: "Agent not found" }, 404);
-  broadcaster.emitEvent({ type: "agents" });
-  return c.json({ ok: true });
+app.post("/api/chats/:id/jobs/:jobId/retry", async (c) => {
+  const chatId = c.req.param("id");
+  const jobId = c.req.param("jobId");
+  const result = await retryChatJob(chatId, jobId);
+  if (!result) return c.json({ error: "Job not found" }, 404);
+  return c.json(result);
 });
 
 /* ------------------------------------------------------------------ */
@@ -1057,7 +1082,7 @@ function listenOnce(p: number): Promise<Awaited<ReturnType<typeof serve>>> {
         writeState({ port: info.port, pid: process.pid, startedAt: Date.now() });
         writePidFile();
         startWatcher();
-        void reconcileInterruptedRuns();
+        void reconcileInterruptedChatJobs();
         void rebuildIndex();
         void loadSemanticIndex().then(() => {
           void rebuildSemanticIndex();

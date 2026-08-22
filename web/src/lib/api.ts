@@ -1,5 +1,4 @@
 import type {
-  AgentRun,
   ChatMessage,
   ChatMeta,
   ChatSearchHit,
@@ -266,20 +265,16 @@ export const api = {
     return downloadExport("/api/export/tasks", { format, project }, `tasks${scope}-${today}.${format}`);
   },
 
-  agents: () => request<AgentRun[]>("/api/agents"),
-  getAgent: (id: string) => request<AgentRun>(`/api/agents/${id}`),
-  createAgent: (prompt: string, contexts: ContextTarget[] = []) =>
-    request<AgentRun>("/api/agents", {
+  enqueueChat: (chatId: string, content: string, contexts: ContextTarget[] = [], images?: string[]) =>
+    request<{ chatId: string; userId: string; assistantId: string }>(`/api/chats/${chatId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, contexts }),
+      body: JSON.stringify({ content, contexts, images }),
     }),
-  cancelAgent: (id: string) =>
-    request<AgentRun>(`/api/agents/${id}/cancel`, { method: "POST" }),
-  retryAgent: (id: string) =>
-    request<AgentRun>(`/api/agents/${id}/retry`, { method: "POST" }),
-  deleteAgent: (id: string) =>
-    request<{ ok: boolean }>(`/api/agents/${id}`, { method: "DELETE" }),
+  cancelChatJob: (chatId: string, jobId: string) =>
+    request<ChatMessage>(`/api/chats/${chatId}/jobs/${jobId}/cancel`, { method: "POST" }),
+  retryChatJob: (chatId: string, jobId: string) =>
+    request<ChatMessage>(`/api/chats/${chatId}/jobs/${jobId}/retry`, { method: "POST" }),
 
   importPreview: (source: ImportSource, path: string) =>
     request<ImportPreview>("/api/import/preview", {

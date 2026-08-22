@@ -1,27 +1,13 @@
-export type ModuleKey = "focus" | "journal" | "today" | "agents";
+export type ModuleKey = "focus" | "journal" | "today";
 export type ModuleSettings = Partial<Record<ModuleKey, boolean>>;
 
-export type AgentStatus = "queued" | "running" | "done" | "failed" | "cancelled";
+export type ChatMessageStatus = "queued" | "streaming" | "done" | "failed" | "cancelled";
 
-export interface AgentStep {
+export interface ChatToolStep {
   name: string;
   status: "start" | "done";
   detail?: string;
   at: number;
-}
-
-export interface AgentRun {
-  id: string;
-  prompt: string;
-  status: AgentStatus;
-  /** Final answer text when done. */
-  result: string;
-  error: string | null;
-  steps: AgentStep[];
-  /** Optional file/folder/tasks context attached to the prompt. */
-  contexts?: ContextTarget[];
-  createdAt: number;
-  updatedAt: number;
 }
 
 export type ImportSource = "obsidian" | "bear" | "roam" | "notion" | "plain";
@@ -118,6 +104,15 @@ export interface LocalAiInfo {
  */
 export type ChatBackend = "auto" | "local" | "cloud";
 
+export interface AiModelProfile {
+  id: string;
+  label: string;
+  provider: string;
+  baseUrl: string;
+  model: string;
+  hasKey: boolean;
+}
+
 export interface AiSettings {
   provider: string;
   baseUrl: string;
@@ -136,6 +131,9 @@ export interface AiSettings {
   local: LocalAiInfo | null;
   /** The user's chosen local chat model, when it differs from auto-detection. */
   ollamaModel?: string;
+  profiles: AiModelProfile[];
+  defaultModelId?: string | null;
+  backupModelId?: string | null;
 }
 
 export interface Settings {
@@ -209,6 +207,9 @@ export interface ChatMessage {
   /** Notes the assistant read while answering; each cites a 1-based line. */
   sources?: ChatSource[];
   createdAt: number;
+  status?: ChatMessageStatus;
+  error?: string | null;
+  steps?: ChatToolStep[];
 }
 
 /** A persisted chat conversation (stored under <workspace>/.persona/chats/). */
@@ -269,8 +270,7 @@ export type ServerEvent =
   | { type: "tasks" }
   | { type: "chats" }
   | { type: "settings" }
-  | { type: "pins" }
-  | { type: "agents" };
+  | { type: "pins" };
 
 /** App-lock preferences. The PIN itself lives in the OS keychain. */
 export interface LockSettings {

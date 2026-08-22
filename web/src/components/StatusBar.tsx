@@ -10,8 +10,8 @@ export default function StatusBar() {
   const activeDocPath = useStore((s) => s.activeDocPath);
   const doc = docs.find((d) => d.path === activeDocPath) ?? null;
   const tasks = useStore((s) => s.tasks);
-  const streaming = useStore((s) => s.streaming);
   const openSettings = useStore((s) => s.openSettings);
+  const chatMessages = useStore((s) => s.messages);
 
   const prevStatus = useRef(doc?.status);
   const [flash, setFlash] = useState(0);
@@ -38,6 +38,7 @@ export default function StatusBar() {
 
   const needsAi = !settings?.ai.hasKey && !settings?.ai.local?.model;
 
+  const hasActiveChat = chatMessages.some((m) => m.role === "assistant" && (m.status === "queued" || m.status === "streaming"));
   let right = "";
   if (view === "write" && doc) {
     right =
@@ -49,7 +50,7 @@ export default function StatusBar() {
             ? "Changed on disk — reload"
             : "Unsaved";
   } else if (view === "chat") {
-    right = streaming
+    right = hasActiveChat
       ? "Thinking…"
       : settings?.ai.model
         ? `${settings?.ai.provider} · ${settings?.ai.model}`
