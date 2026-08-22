@@ -20,7 +20,7 @@ import {
   TextQuote,
 } from "lucide-react";
 import { useStore } from "../state/store";
-import { api, streamChat, streamTransform } from "../lib/api";
+import { api, streamTransform } from "../lib/api";
 import { sounds } from "../lib/sounds";
 import Markdown from "./Markdown";
 import EmptyState from "./EmptyState";
@@ -111,17 +111,11 @@ function CopyButton({ text }: { text: string }) {
 
 export default function ChatView() {
   const messages = useStore((s) => s.messages);
-  const streaming = useStore((s) => s.streaming);
   const currentChatId = useStore((s) => s.currentChatId);
-  const pushMessage = useStore((s) => s.pushMessage);
-  const updateLastMessage = useStore((s) => s.updateLastMessage);
   const updateMessage = useStore((s) => s.updateMessage);
-  const popLastMessage = useStore((s) => s.popLastMessage);
-  const setStreaming = useStore((s) => s.setStreaming);
   const setCurrentChatId = useStore((s) => s.setCurrentChatId);
   const startNewChat = useStore((s) => s.startNewChat);
   const refreshChats = useStore((s) => s.refreshChats);
-  const attachMessageSources = useStore((s) => s.attachMessageSources);
   const openDocAtLine = useStore((s) => s.openDocAtLine);
   const settings = useStore((s) => s.settings);
   const refreshTree = useStore((s) => s.refreshTree);
@@ -134,16 +128,14 @@ export default function ChatView() {
   const [suggestions, setSuggestions] = useState<ContextItem[]>([]);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [toolChips, setToolChips] = useState<{ name: string; done: boolean; detail?: string }[]>([]);
+  const hasQueuedOrStreaming = messages.some((m) => m.role === "assistant" && (m.status === "queued" || m.status === "streaming"));
   const [listening, setListening] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [rewriting, setRewriting] = useState<{ id: string; abort: AbortController } | null>(null);
   const [rewriteUndo, setRewriteUndo] = useState<Record<string, string>>({});
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
   const sendingRef = useRef(false);
-  const idRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrolledUpRef = useRef(false);
@@ -155,15 +147,13 @@ export default function ChatView() {
   const mountedRef = useRef(true);
   const micFailedRef = useRef(false);
 
-  const nextId = (role: "u" | "a") => `${role}${Date.now()}-${idRef.current++}`;
-
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
-  // Persist the conversation as a structured transcript (debounced).
+  // Background queue persists in chat-jobs; keep a lightweight title sync only when idle.
   useEffect(() => {
-    if (messages.length === 0) return;
+    if (messages.length === 0 || hasQueuedOrStreaming) return;
     const timer = setTimeout(async () => {
       const firstUser = messages.find((m) => m.role === "user")?.content ?? "";
       const title = firstUser.replace(/\s+/g, " ").trim().slice(0, 60) || "Untitled chat";
@@ -175,12 +165,12 @@ export default function ChatView() {
       await api.saveChat(id, title, messages).catch(() => {});
     }, 1200);
     return () => clearTimeout(timer);
-  }, [messages, setCurrentChatId]);
+  }, [messages, hasQueuedOrStreaming, setCurrentChatId]);
 
   useEffect(() => {
     if (scrolledUpRef.current) return;
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streaming]);
+  }, [messages, hasQueuedOrStreaming]);
 
   const onScroll = () => {
     const el = scrollRef.current;
@@ -199,29 +189,13 @@ export default function ChatView() {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      abortRef.current?.abort();
-      abortRef.current = null;
-      setStreaming(false);
       if (stopTimerRef.current !== null) window.clearTimeout(stopTimerRef.current);
       if (recorderRef.current?.state === "recording") recorderRef.current.stop();
       recorderRef.current = null;
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
-      // Flush the pending transcript so the latest messages are never lost.
-      const store = useStore.getState();
-      const msgs = store.messages;
-      if (msgs.length > 0 && !store.streaming) {
-        const firstUser = msgs.find((m) => m.role === "user")?.content ?? "";
-        const title = firstUser.replace(/\s+/g, " ").trim().slice(0, 60) || "Untitled chat";
-        let id = store.currentChatId;
-        if (!id) {
-          id = `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-          store.setCurrentChatId(id);
-        }
-        void api.saveChat(id, title, msgs).catch(() => {});
-      }
     };
-  }, [setStreaming]);
+  }, []);
 
   useEffect(() => {
     if (mentionQuery === null) return;
@@ -341,7 +315,7 @@ export default function ChatView() {
   };
 
   const toggleMic = async () => {
-    if (transcribing || streaming || micBusyRef.current) return;
+    if (transcribing || hasQueuedOrStreaming || micBusyRef.current) return;
     if (listening) {
       setListening(false);
       stopRecording();
@@ -395,161 +369,41 @@ export default function ChatView() {
   const send = async () => {
     const content = input.trim();
     const images = pendingImages.slice(0, MAX_IMAGES);
-    if ((!content && images.length === 0) || streaming || sendingRef.current) return;
+    if ((!content && images.length === 0) || sendingRef.current) return;
     if (listening) {
       setListening(false);
       stopRecording();
     }
-    const backend = settings?.ai.backend ?? "auto";
-    if (backend === "local") {
-      if (!settings?.ai.local?.model) {
-        setError(
-          settings?.ai.local
-            ? "Ollama is running but has no models installed. Pull one first: `ollama pull llama3.2`."
-            : "Ollama is not running. Start it, or switch the chat backend in Settings (⌘,).",
-        );
-        return;
-      }
-    } else if (backend === "cloud") {
-      if (!settings?.ai.hasKey) {
-        setError("No API key configured. Open Settings (⌘,) and add one.");
-        return;
-      }
-    } else if (!settings?.ai.hasKey && !settings?.ai.local?.model) {
-      setError(
-        settings?.ai.local
-          ? "Ollama is running but has no models installed. Pull one first: `ollama pull llama3.2`."
-          : "No API key configured. Open Settings (⌘,) and add one.",
-      );
+    const hasModels = (settings?.ai.profiles?.length ?? 0) > 0 || Boolean(settings?.ai.hasKey || settings?.ai.local?.model);
+    if (!hasModels) {
+      setError("No models configured. Open Settings → AI and add one.");
       return;
     }
     setError(null);
+    const snapshotContexts = [...contexts];
     setInput("");
     setContexts([]);
-    setToolChips([]);
     setPendingImages([]);
     sounds.tick();
-    const userMsg = {
-      id: nextId("u"),
-      role: "user" as const,
-      content,
-      contexts: contexts.length ? [...contexts] : undefined,
-      images: images.length ? images : undefined,
-      createdAt: Date.now(),
-    };
-    const assistantId = nextId("a");
-    pushMessage(userMsg);
-    pushMessage({ id: assistantId, role: "assistant", content: "", createdAt: Date.now() });
-    setStreaming(true);
-    const controller = new AbortController();
-    abortRef.current = controller;
-    sendingRef.current = true;
-    // The conversation can be swapped underneath this stream (New Chat /
-    // continue old chat while streaming). Once the assistant bubble this
-    // turn created is gone, the response is dead — abort it instead of
-    // appending into a different conversation.
-    const stillActive = () => useStore.getState().messages.some((m) => m.id === assistantId);
-    const abortIfStale = () => {
-      if (!stillActive()) {
-        controller.abort();
-        return true;
-      }
-      return false;
-    };
-    const seen = new Set<string>();
-    // Attachments stay attached for the last few turns, then drop off so
-    // stale context never bloats the request. The model can always re-read
-    // files with its tools.
-    const allContexts = [...messages, userMsg]
-      .slice(-6)
-      .flatMap((m) => m.contexts ?? [])
-      .filter((c) => {
-        const key = `${c.type}:${c.path}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-    try {
-      await streamChat(
-        [...messages, userMsg],
-        allContexts,
-        {
-          onDelta: (delta) => {
-            if (abortIfStale()) return;
-            updateLastMessage((last) => last + delta);
-          },
-          onDone: () => {
-            if (abortIfStale()) return;
-            setStreaming(false);
-            abortRef.current = null;
-            sendingRef.current = false;
-            sounds.done();
-            void refreshTree();
-            void refreshTasks();
-            inputRef.current?.focus();
-          },
-          onError: (message) => {
-            if (abortIfStale()) return;
-            setStreaming(false);
-            abortRef.current = null;
-            sendingRef.current = false;
-            setError(message);
-            const last = useStore.getState().messages[useStore.getState().messages.length - 1];
-            if (last && last.role === "assistant" && !last.content) {
-              popLastMessage();
-            } else {
-              updateLastMessage((prev) => prev || message);
-            }
-            inputRef.current?.focus();
-          },
-          onTool: (name, status, detail) => {
-            if (abortIfStale()) return;
-            setToolChips((prev) => {
-              if (status === "start") return [...prev, { name, done: false }];
-              const reverseIdx = [...prev].reverse().findIndex((c) => c.name === name && !c.done);
-              if (reverseIdx === -1) return [...prev, { name, done: true, detail }];
-              const next = [...prev];
-              next[prev.length - 1 - reverseIdx] = { name, done: true, detail };
-              return next;
-            });
-          },
-          onCitations: (sources) => {
-            if (abortIfStale()) return;
-            attachMessageSources(sources);
-          },
-        },
-        controller.signal,
-      );
-    } catch (e) {
-      setStreaming(false);
-      abortRef.current = null;
-      sendingRef.current = false;
-      if ((e as Error).name !== "AbortError" && stillActive()) {
-        setError((e as Error).message);
-        const last = useStore.getState().messages[useStore.getState().messages.length - 1];
-        if (last && last.role === "assistant" && !last.content) {
-          popLastMessage();
-        }
-      }
-      inputRef.current?.focus();
-    }
+    const enqueue = useStore.getState().enqueueChatMessage;
+    await enqueue(content, snapshotContexts, images.length ? images : undefined);
+    void refreshTree();
+    void refreshTasks();
   };
 
   const stop = () => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    sendingRef.current = false;
-    setStreaming(false);
+    const lastStreaming = [...messages].reverse().find((m) => m.role === "assistant" && m.status === "streaming");
+    if (lastStreaming) void useStore.getState().cancelChatJob(lastStreaming.id);
     void refreshTree();
     void refreshTasks();
     inputRef.current?.focus();
   };
 
   const isStreamingMessage = (id: string) =>
-    streaming && messages[messages.length - 1]?.id === id;
+    messages.find((m) => m.id === id)?.status === "streaming";
 
   const rewriteMessage = (msg: { id: string; content: string }, mode: TransformMode, lang?: string) => {
-    if (rewriting || streaming || !msg.content.trim()) return;
+    if (rewriting || hasQueuedOrStreaming || !msg.content.trim()) return;
     const original = msg.content;
     setRewriteUndo((prev) => ({ ...prev, [msg.id]: original }));
     const controller = new AbortController();
@@ -862,19 +716,19 @@ export default function ChatView() {
                             ))}
                           </div>
                         )}
-                        {toolChips.length > 0 && isStreamingMessage(msg.id) && (
+                        {msg.steps && msg.steps.length > 0 && isStreamingMessage(msg.id) && (
                           <div className="mt-2 flex flex-wrap gap-1.5">
-                            {toolChips.map((c, i) => (
+                            {msg.steps.map((c, i) => (
                               <span
                                 key={i}
                                 title={c.detail}
                                 className={`flex items-center gap-1.5 text-[11px] rounded-full border px-2 py-0.5 ${
-                                  c.done
+                                  c.status === "done"
                                     ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300"
                                     : "bg-stone-50 dark:bg-stone-800 border-stone-200 dark:border-stone-700 text-stone-500 dark:text-stone-400"
                                 }`}
                               >
-                                {c.done ? (
+                                {c.status === "done" ? (
                                   <Check className="w-3 h-3" />
                                 ) : (
                                   <Loader2 className="w-3 h-3 animate-spin" />
@@ -884,16 +738,28 @@ export default function ChatView() {
                             ))}
                           </div>
                         )}
+                        {msg.status === "queued" && (
+                          <div className="mt-1 text-[11px] text-stone-400">Queued — will run after the current job.</div>
+                        )}
+                        {msg.status === "failed" && msg.error && (
+                          <div className="mt-2 text-[12px] text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 flex items-center justify-between gap-2">
+                            <span>{msg.error}</span>
+                            <button onClick={() => void useStore.getState().retryChatJob(msg.id)} className="px-2 py-1 rounded bg-white border text-stone-700">Retry</button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
                 )}
               </div>
             ))}
-            {error && !streaming && (
+            {error && !hasQueuedOrStreaming && (
               <div className="text-[12.5px] text-red-600 bg-red-50 border border-red-100 rounded-lg px-3.5 py-2.5">
                 {error}
               </div>
+            )}
+            {hasQueuedOrStreaming && (
+              <div className="text-[11px] text-stone-500">Running in background — you can queue more messages or close this chat.</div>
             )}
             <div ref={bottomRef} />
           </div>
@@ -1009,16 +875,15 @@ export default function ChatView() {
                   }
                 }}
                 placeholder={
-                  streaming
-                    ? "Persona is thinking…"
+                  hasQueuedOrStreaming
+                    ? "Queued — add another message…"
                     : transcribing
                       ? "Transcribing your voice…"
                       : listening
                         ? "Listening… tap the mic to stop"
                         : "Ask Persona anything…  (@file, @folder, @tasks)  · paste a screenshot to describe or read it  · tap the mic to dictate"
                 }
-                disabled={streaming}
-                className="w-full px-4 py-3 text-[13.5px] outline-none placeholder:text-stone-400 dark:placeholder:text-stone-500 resize-none bg-transparent disabled:opacity-60 overflow-y-auto"
+                className="w-full px-4 py-3 text-[13.5px] outline-none placeholder:text-stone-400 dark:placeholder:text-stone-500 resize-none bg-transparent overflow-y-auto"
               />
             </div>
 
@@ -1029,11 +894,7 @@ export default function ChatView() {
               <div className="flex-1" />
               <label
                 title="Attach image"
-                className={`p-1.5 rounded-md cursor-pointer ${
-                  streaming
-                    ? "opacity-40 pointer-events-none"
-                    : "text-stone-400 dark:text-stone-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40"
-                }`}
+                className={`p-1.5 rounded-md cursor-pointer text-stone-400 dark:text-stone-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40`}
               >
                 <input
                   type="file"
@@ -1046,8 +907,7 @@ export default function ChatView() {
               </label>
               <button
                 onClick={() => void toggleMic()}
-                disabled={streaming}
-                className={`p-1.5 rounded-md disabled:opacity-40 disabled:cursor-default transition-colors ${
+                className={`p-1.5 rounded-md transition-colors ${
                   listening
                     ? "text-red-600 bg-red-50 dark:bg-red-950/40"
                     : transcribing
@@ -1069,16 +929,16 @@ export default function ChatView() {
                 )}
               </button>
               <button
-                onClick={streaming ? stop : () => void send()}
-                disabled={!streaming && !input.trim() && pendingImages.length === 0}
+                onClick={hasQueuedOrStreaming ? stop : () => void send()}
+                disabled={!hasQueuedOrStreaming && !input.trim() && pendingImages.length === 0}
                 className={`p-1.5 rounded-md disabled:opacity-40 disabled:cursor-default ${
-                  streaming
+                  hasQueuedOrStreaming
                     ? "text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:bg-stone-700/40 dark:hover:bg-stone-700/40"
                     : "text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40"
                 }`}
-                title={streaming ? "Stop" : "Send"}
+                title={hasQueuedOrStreaming ? "Stop" : "Send"}
               >
-                {streaming ? (
+                {hasQueuedOrStreaming ? (
                   <Square className="w-4 h-4" />
                 ) : (
                   <Send className="w-4 h-4" strokeWidth={2} />
@@ -1087,7 +947,7 @@ export default function ChatView() {
             </div>
           </div>
 
-          {messages.length > 0 && !streaming && (
+          {messages.length > 0 && !hasQueuedOrStreaming && (
             <div className="mt-2 flex justify-end">
               <button
                 onClick={() => {
@@ -1096,7 +956,6 @@ export default function ChatView() {
                     if (id) void api.deleteChat(id).catch(() => {});
                     startNewChat();
                     setError(null);
-                    setToolChips([]);
                     void refreshChats();
                   }
                 }}

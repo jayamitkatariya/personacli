@@ -9,7 +9,6 @@ import WriteView from "./components/WriteView";
 import TasksView from "./components/TasksView";
 import ChatView from "./components/ChatView";
 import TodayView from "./components/TodayView";
-import AgentsView from "./components/AgentsView";
 import CommandPalette from "./components/CommandPalette";
 import SettingsModal from "./components/SettingsModal";
 import FocusModal from "./components/FocusModal";
@@ -33,7 +32,6 @@ export default function App() {
   const refreshTasks = useStore((s) => s.refreshTasks);
   const refreshPins = useStore((s) => s.refreshPins);
   const refreshChats = useStore((s) => s.refreshChats);
-  const refreshAgents = useStore((s) => s.refreshAgents);
   const reloadSettings = useStore((s) => s.reloadSettings);
   const openSettings = useStore((s) => s.openSettings);
   const nextTab = useStore((s) => s.nextTab);
@@ -42,7 +40,6 @@ export default function App() {
   const activeDocPath = useStore((s) => s.activeDocPath);
   const createDraft = useStore((s) => s.createDraft);
   const confettiCount = useStore((s) => s.confettiCount);
-  const streaming = useStore((s) => s.streaming);
 
   const [lock, setLock] = useState<LockSettings | null>(null);
   const [locked, setLocked] = useState(false);
@@ -100,9 +97,11 @@ export default function App() {
         const payload = JSON.parse(event.data) as { type: string };
         if (payload.type === "fs") void refreshTree();
         else if (payload.type === "tasks") void refreshTasks();
-        else if (payload.type === "chats") void refreshChats();
-        else if (payload.type === "pins") void refreshPins();
-        else if (payload.type === "agents") void refreshAgents();
+        else if (payload.type === "chats") {
+          void refreshChats();
+          const chatId = useStore.getState().currentChatId;
+          if (chatId) void api.getChat(chatId).then((c) => useStore.setState({ messages: c.messages })).catch(() => {});
+        } else if (payload.type === "pins") void refreshPins();
         else if (payload.type === "settings") {
           void reloadSettings();
           void api.getLock().then(setLock).catch(() => {});
@@ -112,7 +111,7 @@ export default function App() {
       }
     };
     return () => source.close();
-  }, [booted, refreshTree, refreshTasks, refreshChats, refreshPins, refreshAgents, reloadSettings]);
+  }, [booted, refreshTree, refreshTasks, refreshChats, refreshPins, reloadSettings]);
 
   // App lock: load preferences, lock on launch when a PIN is set, and
   // re-prompt after the configured idle window (skipped while AI streams).
@@ -142,10 +141,6 @@ export default function App() {
     };
     document.addEventListener("visibilitychange", onVisibility);
     const interval = setInterval(() => {
-      if (useStore.getState().streaming) {
-        lastActivity = Date.now();
-        return;
-      }
       if (Date.now() - lastActivity > lock.idleMinutes * 60_000) setLocked(true);
     }, 15_000);
     return () => {
@@ -237,7 +232,6 @@ export default function App() {
           {view === "tasks" && <TasksView />}
           {view === "chat" && <ChatView />}
           {view === "today" && <TodayView />}
-          {view === "agents" && <AgentsView />}
         </main>
       </div>
       <StatusBar />

@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import type {
-  AgentRun,
   ChatMessage,
   ChatMeta,
   ChatSource,
@@ -15,7 +14,7 @@ import type {
 import { fileKind } from "../../../src/shared/types";
 import { api } from "../lib/api";
 
-export type View = "write" | "tasks" | "chat" | "today" | "agents";
+export type View = "write" | "tasks" | "chat" | "today";
 export type SaveStatus = "saved" | "saving" | "unsaved" | "conflict";
 export type SidebarTab = "code" | "edit" | "profile";
 
@@ -58,7 +57,6 @@ interface Store {
   docs: OpenDoc[];
   activeDocPath: string | null;
   messages: ChatMessage[];
-  streaming: boolean;
   chats: ChatMeta[];
   currentChatId: string | null;
   expanded: Record<string, boolean>;
@@ -79,7 +77,6 @@ interface Store {
   focusOpen: boolean;
   focusSession: FocusSession | null;
   modules: ModuleSettings;
-  agents: AgentRun[];
 
   boot: () => Promise<void>;
   refreshTree: () => Promise<void>;
@@ -90,11 +87,9 @@ interface Store {
   createDraft: () => Promise<void>;
   finishOnboarding: () => void;
   setModules: (patch: ModuleSettings) => Promise<void>;
-  refreshAgents: () => Promise<void>;
-  createAgent: (prompt: string, contexts?: ContextTarget[]) => Promise<void>;
-  cancelAgent: (id: string) => Promise<void>;
-  retryAgent: (id: string) => Promise<void>;
-  deleteAgent: (id: string) => Promise<void>;
+  enqueueChatMessage: (content: string, contexts: ContextTarget[], images?: string[]) => Promise<void>;
+  cancelChatJob: (jobId: string) => Promise<void>;
+  retryChatJob: (jobId: string) => Promise<void>;
 
   setView: (view: View) => void;
   toggleExpand: (path: string) => void;
@@ -133,7 +128,6 @@ interface Store {
   updateLastMessage: (content: string | ((prev: string) => string)) => void;
   updateMessage: (id: string, content: string) => void;
   popLastMessage: () => void;
-  setStreaming: (streaming: boolean) => void;
   clearMessages: () => void;
   attachMessageSources: (sources: ChatSource[]) => void;
   loadChat: (id: string) => Promise<void>;
@@ -165,7 +159,6 @@ export const useStore = create<Store>((set, get) => ({
   docs: [],
   activeDocPath: null,
   messages: [],
-  streaming: false,
   chats: [],
   currentChatId: null,
   expanded: {},
@@ -185,7 +178,6 @@ export const useStore = create<Store>((set, get) => ({
   focusOpen: false,
   focusSession: null,
   modules: {},
-  agents: [],
 
   boot: async () => {
     const settings = await api.getSettings().catch(() => null);
@@ -201,7 +193,6 @@ export const useStore = create<Store>((set, get) => ({
       get().refreshTasks();
       get().refreshPins();
       get().refreshChats();
-      get().refreshAgents();
     }
   },
 
@@ -234,34 +225,51 @@ export const useStore = create<Store>((set, get) => ({
     set({ chats });
   },
 
-  refreshAgents: async () => {
-    const agents = await api.agents().catch(() => []);
-    set({ agents });
-  },
-
   setModules: async (patch) => {
     await api.saveSettings({ modules: patch }).catch(() => {});
     await get().reloadSettings();
   },
 
-  createAgent: async (prompt, contexts = []) => {
-    await api.createAgent(prompt, contexts).catch(() => {});
-    await get().refreshAgents();
+  enqueueChatMessage: async (content, contexts = [], images) => {
+    const state = get();
+    let chatId = state.currentChatId;
+    if (!chatId) {
+      chatId = `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      set({ currentChatId: chatId });
+    }
+    try {
+      const res = await api.enqueueChat(chatId, content, contexts, images);
+      const chat = await api.getChat(res.chatId).catch(() => null);
+      if (chat) {
+        set({ messages: chat.messages, currentChatId: chat.id });
+      } else {
+        const userMsg: ChatMessage = { id: res.userId, role: "user", content, contexts: contexts.length ? contexts : undefined, images, createdAt: Date.now() };
+        const assistantMsg: ChatMessage = { id: res.assistantId, role: "assistant", content: "", createdAt: Date.now(), status: "queued", steps: [] };
+        set((s) => ({ messages: [...s.messages, userMsg, assistantMsg] }));
+      }
+      await get().refreshChats();
+    } catch {
+      const assistantId = `a${Date.now()}`;
+      const userMsg: ChatMessage = { id: `u${Date.now()}`, role: "user", content, contexts: contexts.length ? contexts : undefined, images, createdAt: Date.now() };
+      const assistantMsg: ChatMessage = { id: assistantId, role: "assistant", content: "", createdAt: Date.now(), status: "failed" as const, error: "Failed to queue", steps: [] };
+      set((s) => ({ messages: [...s.messages, userMsg, assistantMsg] }));
+    }
   },
 
-  cancelAgent: async (id) => {
-    await api.cancelAgent(id).catch(() => {});
-    await get().refreshAgents();
+  cancelChatJob: async (jobId) => {
+    const chatId = get().currentChatId;
+    if (!chatId) return;
+    await api.cancelChatJob(chatId, jobId).catch(() => {});
+    const chat = await api.getChat(chatId).catch(() => null);
+    if (chat) set({ messages: chat.messages });
   },
 
-  retryAgent: async (id) => {
-    await api.retryAgent(id).catch(() => {});
-    await get().refreshAgents();
-  },
-
-  deleteAgent: async (id) => {
-    await api.deleteAgent(id).catch(() => {});
-    await get().refreshAgents();
+  retryChatJob: async (jobId) => {
+    const chatId = get().currentChatId;
+    if (!chatId) return;
+    await api.retryChatJob(chatId, jobId).catch(() => {});
+    const chat = await api.getChat(chatId).catch(() => null);
+    if (chat) set({ messages: chat.messages });
   },
 
   reloadSettings: async () => {
@@ -295,7 +303,7 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   setView: (view) => {
-    const tabMap = { chat: "code", write: "edit", tasks: "profile", today: "code", agents: "code" } as const;
+    const tabMap = { chat: "code", write: "edit", tasks: "profile", today: "code" } as const;
     set({ view, sidebarTab: tabMap[view] });
   },
 
@@ -554,7 +562,6 @@ export const useStore = create<Store>((set, get) => ({
     })),
   popLastMessage: () =>
     set((s) => ({ messages: s.messages.slice(0, -1) })),
-  setStreaming: (streaming) => set({ streaming }),
   clearMessages: () => set({ messages: [] }),
   loadChat: async (id) => {
     const chat = await api.getChat(id).catch(() => null);
@@ -562,13 +569,12 @@ export const useStore = create<Store>((set, get) => ({
     set({
       messages: chat.messages,
       currentChatId: chat.id,
-      streaming: false,
       view: "chat",
       sidebarTab: "code",
     });
   },
   startNewChat: () =>
-    set({ messages: [], currentChatId: null, streaming: false, view: "chat", sidebarTab: "code" }),
+    set({ messages: [], currentChatId: null, view: "chat", sidebarTab: "code" }),
   setCurrentChatId: (id) => set({ currentChatId: id }),
   attachMessageSources: (sources) =>
     set((s) => {

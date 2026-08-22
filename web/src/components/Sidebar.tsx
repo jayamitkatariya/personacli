@@ -22,7 +22,6 @@ import {
   MessageCircle,
   Timer,
   BookOpen,
-  Bot,
 } from "lucide-react";
 import { useStore, type View } from "../state/store";
 import type { ModuleKey, TreeNode } from "../../../src/shared/types";
@@ -188,7 +187,6 @@ export default function Sidebar() {
 const MODULE_DEFS: { key: ModuleKey; icon: typeof Timer; label: string; view: View | null }[] = [
   { key: "focus", icon: Timer, label: "Focus", view: null },
   { key: "today", icon: Sunrise, label: "Today", view: "today" },
-  { key: "agents", icon: Bot, label: "Agents", view: "agents" },
 ];
 
 function ModuleNav() {

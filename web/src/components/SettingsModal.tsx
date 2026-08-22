@@ -251,6 +251,9 @@ export default function SettingsModal() {
   const [apiKey, setApiKey] = useState("");
   const [localModel, setLocalModel] = useState("");
   const [backend, setBackend] = useState<ChatBackend>("auto");
+  const [profiles, setProfiles] = useState<{ id: string; label: string; provider: string; baseUrl: string; model: string; key: string }[]>([]);
+  const [defaultModelId, setDefaultModelId] = useState<string>("");
+  const [backupModelId, setBackupModelId] = useState<string>("");
   const [theme, setTheme] = useState<Theme>("system");
   const [accent, setAccent] = useState<string>(DEFAULT_ACCENT);
   const [typo, setTypo] = useState<TypographySettings>(DEFAULT_TYPOGRAPHY);
@@ -307,6 +310,9 @@ export default function SettingsModal() {
         setEmbeddingApiKey("");
         setLocalModel(settings.ai.ollamaModel ?? settings.ai.local?.model ?? "");
         setBackend(settings.ai.backend ?? "auto");
+        setProfiles((settings.ai.profiles ?? []).map((p) => ({ id: p.id, label: p.label, provider: p.provider, baseUrl: p.baseUrl, model: p.model, key: "" })));
+        setDefaultModelId(settings.ai.defaultModelId ?? "");
+        setBackupModelId(settings.ai.backupModelId ?? "");
         setApiKey("");
         setTheme(settings.theme ?? "system");
         setAccent(settings.accent ?? DEFAULT_ACCENT);
@@ -377,6 +383,11 @@ export default function SettingsModal() {
     setAiSaving(true);
     setAiError(null);
     try {
+      const filteredProfiles = profiles
+        .filter((p) => p.label.trim() && p.baseUrl.trim() && p.model.trim())
+        .map((p) => ({ id: p.id, label: p.label.trim(), provider: p.provider.trim() || "OpenAI-compatible", baseUrl: p.baseUrl.trim(), model: p.model.trim() }));
+      const profileKeys: Record<string, string> = {};
+      for (const p of profiles) if (p.key.trim()) profileKeys[p.id] = p.key.trim();
       await api.saveSettings({
         ai: {
           provider,
@@ -386,12 +397,17 @@ export default function SettingsModal() {
           backend,
           embeddingBaseUrl: embeddingBaseUrl.trim(),
           ollamaModel: localModel || undefined,
+          profiles: filteredProfiles,
+          defaultModelId: defaultModelId || null,
+          backupModelId: backupModelId || null,
         },
         aiKey: apiKey || undefined,
         embeddingAiKey: embeddingApiKey || undefined,
-      });
+        profileKeys: Object.keys(profileKeys).length ? profileKeys : undefined,
+      } as Parameters<typeof api.saveSettings>[0] & { profileKeys?: Record<string, string> });
       setApiKey("");
       setEmbeddingApiKey("");
+      setProfiles((prev) => prev.map((p) => ({ ...p, key: "" })));
       await reloadSettings();
       flashSaved();
     } catch (e) {
@@ -1155,6 +1171,63 @@ export default function SettingsModal() {
                   </div>
 
                   <div className="pt-4 border-t border-stone-100 dark:border-stone-800">
+                    <div className="flex items-center justify-between">
+                      <p className="block text-[12.5px] font-medium text-stone-800 dark:text-stone-200">Models</p>
+                      <button
+                        type="button"
+                        onClick={() => setProfiles((prev) => [...prev, { id: `m${Date.now()}`, label: "", provider: "OpenAI-compatible", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", key: "" }])}
+                        className={secondaryBtnClass}
+                      >
+                        Add model
+                      </button>
+                    </div>
+                    <p className={helperClass}>Add multiple models. Pick default + backup right here — chat fails over automatically.</p>
+                    {profiles.length === 0 && <p className="mt-2 text-[11.5px] text-stone-400">No extra models yet. Use the fields above as your primary, or add one below.</p>}
+                    <div className="mt-3 space-y-3">
+                      {profiles.map((p, idx) => (
+                        <div key={p.id} className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 space-y-2 bg-stone-50/60 dark:bg-stone-800/50">
+                          <div className="grid grid-cols-2 gap-2">
+                            <input value={p.label} onChange={(e) => setProfiles((prev) => prev.map((x, i) => (i === idx ? { ...x, label: e.target.value } : x)))} placeholder="Label e.g. GPT-4o" className={inputClass} />
+                            <input value={p.provider} onChange={(e) => setProfiles((prev) => prev.map((x, i) => (i === idx ? { ...x, provider: e.target.value } : x)))} placeholder="Provider" className={inputClass} />
+                          </div>
+                          <input value={p.baseUrl} onChange={(e) => setProfiles((prev) => prev.map((x, i) => (i === idx ? { ...x, baseUrl: e.target.value } : x)))} placeholder="Base URL" className={inputClass} />
+                          <div className="grid grid-cols-2 gap-2">
+                            <input value={p.model} onChange={(e) => setProfiles((prev) => prev.map((x, i) => (i === idx ? { ...x, model: e.target.value } : x)))} placeholder="Model" className={inputClass} />
+                            <input type="password" value={p.key} onChange={(e) => setProfiles((prev) => prev.map((x, i) => (i === idx ? { ...x, key: e.target.value } : x)))} placeholder="API key (stored in Keychain)" className={inputClass} />
+                          </div>
+                          <div className="flex gap-2">
+                            <button type="button" onClick={() => setDefaultModelId(p.id)} className={`px-3 py-1.5 rounded-lg border text-[11.5px] ${defaultModelId === p.id ? "bg-blue-600 text-white border-blue-600" : "bg-white dark:bg-stone-700 border-stone-200 dark:border-stone-600"}`}>Default{defaultModelId === p.id ? " ✓" : ""}</button>
+                            <button type="button" onClick={() => setBackupModelId(p.id)} className={`px-3 py-1.5 rounded-lg border text-[11.5px] ${backupModelId === p.id ? "bg-amber-500 text-white border-amber-500" : "bg-white dark:bg-stone-700 border-stone-200 dark:border-stone-600"}`}>Backup{backupModelId === p.id ? " ✓" : ""}</button>
+                            <button type="button" onClick={() => setProfiles((prev) => prev.filter((_, i) => i !== idx))} className="ml-auto text-[11.5px] text-red-500">Remove</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {profiles.length > 0 && (
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <div>
+                          <label className={labelClass}>Default model</label>
+                          <select value={defaultModelId} onChange={(e) => setDefaultModelId(e.target.value)} className={inputClass}>
+                            <option value="">(use primary/base)</option>
+                            {profiles.map((p) => (
+                              <option key={p.id} value={p.id}>{p.label || p.model || p.id}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className={labelClass}>Backup model</label>
+                          <select value={backupModelId} onChange={(e) => setBackupModelId(e.target.value)} className={inputClass}>
+                            <option value="">None</option>
+                            {profiles.map((p) => (
+                              <option key={p.id} value={p.id}>{p.label || p.model || p.id}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-4 border-t border-stone-100 dark:border-stone-800">
                     <p className="block text-[12.5px] font-medium text-stone-800 dark:text-stone-200 mb-2">
                       Embeddings (semantic search)
                     </p>
@@ -1295,7 +1368,6 @@ export default function SettingsModal() {
                       { key: "focus", title: "Focus timer", desc: "A shortcut to start a focus session." },
                       { key: "journal", title: "Journal", desc: "Quick-capture lines straight into today's note." },
                       { key: "today", title: "Today's Stuff", desc: "A daily planning view for due tasks." },
-                      { key: "agents", title: "Agents", desc: "Background AI runs for multi-step tasks." },
                     ] as { key: ModuleKey; title: string; desc: string }[]
                   ).map((m) => (
                     <div key={m.key} className="flex items-center justify-between gap-4">

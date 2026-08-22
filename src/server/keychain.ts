@@ -3,6 +3,11 @@ import { readConfig, writeConfig } from "./state.js";
 const SERVICE = "persona";
 const ACCOUNT = "api-key";
 const EMBEDDING_ACCOUNT = "embedding-api-key";
+const PROFILE_PREFIX = "profile:";
+
+function profileAccount(id: string): string {
+  return `${PROFILE_PREFIX}${id}`;
+}
 
 let keyring: typeof import("@napi-rs/keyring") | null = null;
 try {
@@ -140,4 +145,59 @@ export async function clearEmbeddingApiKey() {
     }
   }
   fileFallbackEmbeddingClear();
+}
+
+export async function getProfileApiKey(id: string): Promise<string | null> {
+  const e = entry(profileAccount(id));
+  if (e) {
+    try {
+      const value = await e.getPassword();
+      if (value) return value;
+    } catch {
+      // fall through
+    }
+  }
+  const config = readConfig();
+  const found = config.ai?.profiles?.find((p) => p.id === id);
+  return found?.apiKey ?? null;
+}
+
+export async function setProfileApiKey(id: string, key: string) {
+  const e = entry(profileAccount(id));
+  if (e) {
+    try {
+      await e.setPassword(key);
+      const config = readConfig();
+      const profiles = (config.ai?.profiles ?? []).map((p) => (p.id === id ? { ...p, apiKey: undefined } : p));
+      config.ai = { ...config.ai, profiles };
+      writeConfig(config);
+      return;
+    } catch {
+      // fall through
+    }
+  }
+  const config = readConfig();
+  const profiles = config.ai?.profiles ?? [];
+  const next = profiles.map((p) => (p.id === id ? { ...p, apiKey: key } : p));
+  config.ai = { ...config.ai, profiles: next };
+  writeConfig(config);
+}
+
+export async function clearProfileApiKey(id: string) {
+  const e = entry(profileAccount(id));
+  if (e) {
+    try {
+      await e.deletePassword();
+    } catch {
+      // ignore
+    }
+  }
+  const config = readConfig();
+  const profiles = (config.ai?.profiles ?? []).map((p) => (p.id === id ? { ...p, apiKey: undefined } : p));
+  config.ai = { ...config.ai, profiles };
+  writeConfig(config);
+}
+
+export async function hasProfileApiKey(id: string): Promise<boolean> {
+  return (await getProfileApiKey(id)) !== null;
 }

@@ -37,6 +37,9 @@ export interface ConfigFile {
     /** Embeddings are served from here when set (e.g. a local Ollama). */
     embeddingBaseUrl?: string;
     embeddingApiKey?: string; // fallback only; keychain is preferred
+    profiles?: Array<{ id: string; label: string; provider?: string; baseUrl?: string; model?: string; apiKey?: string }>;
+    defaultModelId?: string | null;
+    backupModelId?: string | null;
   };
 }
 
