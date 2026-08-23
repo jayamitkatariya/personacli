@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Persona — a local-first personal workspace</title>
+<meta name="description" content="Notes, tasks, and an AI that knows your files. Everything is plain Markdown on your machine. No accounts, no cloud, no database.">
+<style>
+:root{--bg:#0d1117;--card:#161b22;--border:#30363d;--fg:#e6edf3;--muted:#8b949e;--accent:#7c95ff}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg);line-height:1.6}
+.wrap{max-width:900px;margin:0 auto;padding:0 24px}
+header{padding:80px 0 40px;text-align:center}
+h1{font-size:clamp(2.2rem,6vw,3.4rem);letter-spacing:-.03em;margin-bottom:12px}
+h1 span{background:linear-gradient(90deg,#7c95ff,#4ade80);-webkit-background-clip:text;background-clip:text;color:transparent}
+.tagline{font-size:1.25rem;color:var(--muted);max-width:640px;margin:0 auto}
+.pill{display:inline-block;margin-top:20px;padding:6px 14px;border:1px solid var(--border);border-radius:999px;color:var(--muted);font-size:.85rem}
+.cta{display:flex;gap:14px;justify-content:center;margin-top:32px;flex-wrap:wrap}
+.btn{padding:13px 26px;border-radius:10px;font-weight:600;text-decoration:none;font-size:1rem}
+.btn.primary{background:#e6edf3;color:#0d1117}
+.btn.secondary{border:1px solid var(--border);color:var(--fg)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin:56px 0}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:24px}
+.card h3{font-size:1.05rem;margin-bottom:8px}
+.card p{color:var(--muted);font-size:.95rem}
+section{padding:36px 0}
+h2{font-size:1.7rem;letter-spacing:-.02em;margin-bottom:18px;text-align:center}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;font-size:1rem;overflow-x:auto;color:#a5d6ff}
+.prompt{background:var(--card);border-radius:12px;border:1px solid var(--border);padding:22px;max-width:680px;margin:0 auto;font-size:.95rem}
+.prompt .you{color:#7c95ff;font-weight:600}
+.prompt .ai{color:#4ade80;font-weight:600}
+.prompt p{margin:4px 0}
+footer{text-align:center;color:var(--muted);font-size:.85rem;padding:40px 0;border-top:1px solid var(--border)}
+footer a{color:var(--fg)}
+</style>
+</head>
+<body>
+<header class="wrap">
+<h1>Your second brain,<br><span>still just .md files.</span></h1>
+<p class="tagline">Persona is a local-first personal workspace — notes, tasks, and an AI chat that answers from your own files.</p>
+<span class="pill">No accounts · No cloud · No database · MIT licensed</span>
+<div class="cta">
+<a class="btn primary" href="https://github.com/jayamitkatariya/personacli">★ Star on GitHub</a>
+<a class="btn secondary" href="https://github.com/jayamitkatariya/personacli#getting-started">Get started</a>
+</div>
+</header>
+<main class="wrap">
+<section>
+<h2>One command and you're in</h2>
+<pre>$ persona   <span style="color:#8b949e"># starts local server, opens your browser</span></pre>
+</section>
+<div class="grid">
+<div class="card"><h3>📄 Plain Markdown forever</h3><p>If Persona disappeared tomorrow, your data is still a folder of <code>.md</code> files any editor can open. Zero lock-in.</p></div>
+<div class="card"><h3>🧠 AI that knows your files</h3><p>Chat is grounded in your actual notes and tasks — answers cite the files they came from instead of guessing.</p></div>
+<div class="card"><h3>✅ Tasks with context</h3><p>A personal task list with project tags that the AI can see, so "what should I do next?" actually works.</p></div>
+<div class="card"><h3>🔒 Fully local option</h3><p>Point it at Ollama or any OpenAI-compatible endpoint and nothing ever leaves your machine.</p></div>
+</div>
+<section>
+<h2>Ask your workspace anything</h2>
+<div class="prompt">
+<p><span class="you">You:</span> what did I write about the apartment hunt last week?</p>
+<p><span class="ai">Persona:</span> From <code>notes/apartment.md</code>: you narrowed it to two places near Campus Ave and wanted to decide by Sept 1. Your task list has "tour Falcon Towers" scheduled for Friday…</p>
+</div>
+</section>
+<section style="text-align:center">
+<h2>Built for macOS · Apple Silicon first</h2>
+<p style="color:var(--muted)">Node.js ≥ 20 · clone, install, run. Voice input runs on Metal.</p>
+<div class="cta">
+<a class="btn primary" href="https://github.com/jayamitkatariya/personacli">View source →</a>
+</div>
+</section>
+</main>
+<footer>Made by <a href="https://jayamitkatariya.com">Jay Katariya</a> · <a href="https://github.com/jayamitkatariya/personacli">GitHub</a> · MIT License</footer>
+</body>
+</html>
