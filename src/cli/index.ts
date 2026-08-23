@@ -419,6 +419,39 @@ cli
     console.log("All good." + (up ? "" : " Run `persona` to start."));
   });
 
+cli
+  .command("mcp", "Run Persona as an MCP server (stdio, for Claude Code / Hermes). See docs/mcp.md")
+  .action(async () => {
+    // Stdio transport uses stdin/stdout for JSON-RPC — never write to stdout here.
+    // Dynamically import to avoid loading MCP SDK for other CLI commands.
+    const { createPersonaMcpServer } = await import("../mcp/server.js");
+    const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
+    const server = createPersonaMcpServer();
+    const transport = new StdioServerTransport();
+    const log = (...args: unknown[]) => console.error("[persona-mcp]", ...args);
+    // Graceful shutdown — SIGINT from client disconnect
+    process.on("SIGINT", async () => {
+      try {
+        await server.close();
+      } catch {}
+      process.exit(0);
+    });
+    process.on("SIGTERM", async () => {
+      try {
+        await server.close();
+      } catch {}
+      process.exit(0);
+    });
+    try {
+      const ws = getWorkspace();
+      if (ws) log(`workspace: ${ws}`);
+      else log("workspace: not configured (run `persona` to pick a folder)");
+    } catch {}
+    await server.connect(transport);
+    log("Persona MCP server running on stdio");
+    // Keep process alive — transport holds event loop.
+  });
+
 cli.help();
 cli.version("0.2.0");
 

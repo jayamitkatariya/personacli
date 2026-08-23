@@ -31,7 +31,7 @@ import { api } from "../lib/api";
 import { setSoundsEnabled, soundsEnabled, sounds } from "../lib/sounds";
 import { ACCENT_PRESETS, DEFAULT_ACCENT, applyAccent, normalizeAccent } from "../lib/accent";
 import { applyTypography } from "../lib/typography";
-import type { ChatBackend, Density, FontFamily, ImportPreview, ImportSource, LockSettings, ModuleKey, TypographySettings } from "../../../src/shared/types";
+import type { ChatBackend, Density, FontFamily, ImportPreview, ImportSource, LockSettings, ModuleKey, ToolApprovalMode, TypographySettings } from "../../../src/shared/types";
 import { DEFAULT_TYPOGRAPHY } from "../../../src/shared/types";
 
 type Theme = "light" | "dark" | "system";
@@ -251,6 +251,7 @@ export default function SettingsModal() {
   const [apiKey, setApiKey] = useState("");
   const [localModel, setLocalModel] = useState("");
   const [backend, setBackend] = useState<ChatBackend>("auto");
+  const [toolApproval, setToolApproval] = useState<ToolApprovalMode>("ask");
   const [profiles, setProfiles] = useState<{ id: string; label: string; provider: string; baseUrl: string; model: string; key: string }[]>([]);
   const [defaultModelId, setDefaultModelId] = useState<string>("");
   const [backupModelId, setBackupModelId] = useState<string>("");
@@ -310,6 +311,7 @@ export default function SettingsModal() {
         setEmbeddingApiKey("");
         setLocalModel(settings.ai.ollamaModel ?? settings.ai.local?.model ?? "");
         setBackend(settings.ai.backend ?? "auto");
+        setToolApproval(settings.ai.toolApproval ?? "ask");
         setProfiles((settings.ai.profiles ?? []).map((p) => ({ id: p.id, label: p.label, provider: p.provider, baseUrl: p.baseUrl, model: p.model, key: "" })));
         setDefaultModelId(settings.ai.defaultModelId ?? "");
         setBackupModelId(settings.ai.backupModelId ?? "");
@@ -400,6 +402,7 @@ export default function SettingsModal() {
           profiles: filteredProfiles,
           defaultModelId: defaultModelId || null,
           backupModelId: backupModelId || null,
+          toolApproval,
         },
         aiKey: apiKey || undefined,
         embeddingAiKey: embeddingApiKey || undefined,
@@ -1322,6 +1325,29 @@ export default function SettingsModal() {
                         {reindexInfo}
                       </span>
                     )}
+                  </div>
+
+                  <div>
+                    <label className={labelClass}>Destructive actions</label>
+                    <div className="flex gap-2">
+                      {(["ask", "auto"] as ToolApprovalMode[]).map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => setToolApproval(mode)}
+                          className={`flex-1 px-3 py-2 rounded-lg border text-[12px] transition-colors ${
+                            toolApproval === mode
+                              ? "border-blue-400 bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300"
+                              : "border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-700/40"
+                          }`}
+                        >
+                          {mode === "ask" ? "Ask first" : "Auto-approve"}
+                        </button>
+                      ))}
+                    </div>
+                    <p className={helperClass}>
+                      When “Ask first”, Persona shows an Approve / Deny card before overwriting, deleting, moving or renaming files.
+                    </p>
                   </div>
 
                   <div className="pt-4 border-t border-stone-100 dark:border-stone-800 flex flex-col gap-3">

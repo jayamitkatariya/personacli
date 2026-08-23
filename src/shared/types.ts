@@ -3,6 +3,17 @@ export type ModuleSettings = Partial<Record<ModuleKey, boolean>>;
 
 export type ChatMessageStatus = "queued" | "streaming" | "done" | "failed" | "cancelled";
 
+/** A tool call waiting for user approval before it executes. */
+export interface ChatApprovalRequest {
+  id: string;
+  tool: string;
+  /** Truncated copies of the call's arguments, for the approval card. */
+  args: Record<string, unknown>;
+}
+
+/** How destructive AI tool calls are handled. */
+export type ToolApprovalMode = "ask" | "auto";
+
 export interface ChatToolStep {
   name: string;
   status: "start" | "done";
@@ -134,6 +145,8 @@ export interface AiSettings {
   profiles: AiModelProfile[];
   defaultModelId?: string | null;
   backupModelId?: string | null;
+  /** "ask" gates destructive tool calls behind an approval card (default). */
+  toolApproval: ToolApprovalMode;
 }
 
 export interface Settings {
@@ -210,6 +223,12 @@ export interface ChatMessage {
   status?: ChatMessageStatus;
   error?: string | null;
   steps?: ChatToolStep[];
+  /** Set while a destructive tool call waits for the user's decision. */
+  pendingApproval?: ChatApprovalRequest | null;
+  /** Provider-reported token counts for this reply (cloud models only). */
+  usage?: { promptTokens: number; completionTokens: number };
+  /** Stores the content before the last AI rewrite so Undo survives reloads. */
+  undoContent?: string | null;
 }
 
 /** A persisted chat conversation (stored under <workspace>/.persona/chats/). */
@@ -223,6 +242,25 @@ export interface ChatMeta {
 
 export interface ChatTranscript extends ChatMeta {
   messages: ChatMessage[];
+  /** Per-chat AI overrides. null/undefined = follow global settings. */
+  modelId?: string | null;
+  personaId?: string | null;
+  temperature?: number | null;
+}
+
+/** Patchable per-chat AI settings. */
+export interface ChatSettingsInput {
+  modelId?: string | null;
+  personaId?: string | null;
+  temperature?: number | null;
+}
+
+/** A named system-prompt add-on ("persona") selectable per chat. */
+export interface Persona {
+  id: string;
+  name: string;
+  prompt: string;
+  builtin: boolean;
 }
 
 export interface ChatSearchHit {

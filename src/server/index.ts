@@ -40,15 +40,18 @@ import { rebuildIndex, search } from "./search.js";
 import { addPin, getPinboard, removePin, retargetPins } from "./pins.js";
 import { getLastBuildError, loadSemanticIndex, rebuildSemanticIndex } from "./embeddings.js";
 import { transcribeAudio } from "./stt.js";
-import { deleteChat, getChat, listChats, saveChat, searchChats } from "./chats.js";
+import { deleteChat, forkChat, getChat, listChats, saveChat, searchChats, updateChatSettings } from "./chats.js";
+import { listPersonas } from "./personas.js";
 import { getLockSettings, updateLockSettings, verifyPin } from "./lock.js";
 import { streamTransform, TRANSFORM_MODES } from "./transform.js";
 import { previewImport, runImport } from "./import.js";
-import { cancelChatJob, enqueueChatMessage, reconcileInterruptedChatJobs, retryChatJob } from "./chat-jobs.js";
+import { cancelChatJob, editUserMessage, enqueueChatMessage, reconcileInterruptedChatJobs, resolveChatApproval, retryChatJob } from "./chat-jobs.js";
 import { getProfileApiKey, hasProfileApiKey, setProfileApiKey } from "./keychain.js";
 import { DEFAULT_TYPOGRAPHY } from "../shared/types.js";
 import type {
   AiModelProfile,
+  ChatMessage,
+  ChatTranscript,
   ContextItem,
   ContextTarget,
   Density,
@@ -82,6 +85,67 @@ app.onError((err, c) => {
 });
 
 app.get("/api/health", (c) => c.json({ app: "persona", version: "0.2.0", ok: true }));
+
+// MCP Streamable HTTP — stateless per-request (works with any MCP client over HTTP)
+// Also exposes /mcp for clients that expect root path.
+async function handleMcpRequest(c: import("hono").Context) {
+  // Lazy import to avoid loading MCP SDK when not used
+  const { WebStandardStreamableHTTPServerTransport } = await import(
+    "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js"
+  );
+  const { createPersonaMcpServer } = await import("../mcp/server.js");
+  const server = createPersonaMcpServer();
+  const transport = new WebStandardStreamableHTTPServerTransport({
+    sessionIdGenerator: undefined, // stateless — new transport per request
+    enableJsonResponse: true,
+  });
+  await server.connect(transport);
+  try {
+    // Hono's c.req.raw is a standard Request; pass it directly
+    const response = await transport.handleRequest(c.req.raw);
+    return response;
+  } finally {
+    // transport is per-request; close after handling to free resources
+    // Do not await server.close() synchronously — it would close before streaming finishes
+    // The transport manages its own lifecycle per request.
+  }
+}
+
+app.all("/mcp", handleMcpRequest);
+app.all("/api/mcp", handleMcpRequest);
+
+// Discovery helper — returns MCP connection info without needing MCP handshake
+app.get("/api/mcp/info", (c) =>
+  c.json({
+    name: "persona",
+    version: "0.2.0",
+    description: "Local-first Persona workspace MCP server",
+    transports: {
+      stdio: { command: "persona", args: ["mcp"] },
+      http: { url: "/mcp", type: "streamable-http" },
+      altHttp: { url: "/api/mcp", type: "streamable-http" },
+    },
+    tools: [
+      "get_workspace_info",
+      "list_folder",
+      "read_note",
+      "create_note",
+      "write_note",
+      "append_note",
+      "create_folder",
+      "move_file",
+      "rename_file",
+      "delete_file",
+      "list_tasks",
+      "create_task",
+      "update_task",
+      "delete_task",
+      "search",
+    ],
+    resources: ["persona://workspace", "persona://file/{path}"],
+    prompts: ["triage-tasks"],
+  }),
+);
 
 app.post("/api/stt/transcribe", async (c) => {
   const form = await c.req.formData().catch(() => null);
@@ -156,6 +220,7 @@ app.get("/api/settings", async (c) => {
       profiles,
       defaultModelId: config.ai?.defaultModelId ?? null,
       backupModelId: config.ai?.backupModelId ?? null,
+      toolApproval: config.ai?.toolApproval ?? "ask",
     },
     modules: mergeModules(config.modules),
   };
@@ -185,6 +250,7 @@ app.put("/api/settings", async (c) => {
       profiles?: Array<{ id: string; label: string; provider?: string; baseUrl?: string; model?: string }>;
       defaultModelId?: string | null;
       backupModelId?: string | null;
+      toolApproval?: "ask" | "auto";
     };
     aiKey?: string;
     embeddingAiKey?: string;
@@ -264,6 +330,10 @@ app.put("/api/settings", async (c) => {
       embeddingBaseUrl: embeddingBaseUrl === undefined
         ? config.ai?.embeddingBaseUrl
         : embeddingBaseUrl || undefined,
+      toolApproval:
+        body.ai.toolApproval === "ask" || body.ai.toolApproval === "auto"
+          ? body.ai.toolApproval
+          : config.ai?.toolApproval ?? "ask",
       ollamaModel: typeof body.ai.ollamaModel === "string" && body.ai.ollamaModel.trim()
         ? body.ai.ollamaModel.trim()
         : config.ai?.ollamaModel,
@@ -651,10 +721,35 @@ app.get("/api/chats/search", async (c) => {
   return c.json(await searchChats(c.req.query("q") ?? ""));
 });
 
+function chatToMarkdown(chat: ChatTranscript): string {
+  const lines: string[] = [`# ${chat.title}`, ""];
+  for (const m of chat.messages) {
+    const when = new Date(m.createdAt).toLocaleString();
+    lines.push(m.role === "user" ? `## User · ${when}` : `## Assistant · ${when}`);
+    if (m.pendingApproval) lines.push(`> ⏳ Awaiting approval: ${m.pendingApproval.tool}`);
+    lines.push("", m.content || "*(no content)*", "");
+    if (m.sources?.length) {
+      lines.push(`*Sources: ${m.sources.map((s) => `${s.path}:${s.line}`).join(", ")}*`, "");
+    }
+    if (m.usage) lines.push(`*Tokens: ${m.usage.promptTokens} in / ${m.usage.completionTokens} out*`, "");
+  }
+  return lines.join("\n");
+}
+
 app.get("/api/chats/:id", async (c) => {
   const chat = await getChat(c.req.param("id"));
   if (!chat) return c.json({ error: "Chat not found" }, 404);
   return c.json(chat);
+});
+
+app.get("/api/chats/:id/export", async (c) => {
+  const chat = await getChat(c.req.param("id"));
+  if (!chat) return c.json({ error: "Chat not found" }, 404);
+  const md = chatToMarkdown(chat);
+  const safe = (chat.title.replace(/[^a-z0-9-]+/gi, "-").slice(0, 40) || chat.id).replace(/^-|-$/g, "");
+  c.header("Content-Type", "text/markdown; charset=utf-8");
+  c.header("Content-Disposition", `attachment; filename="${safe}.md"`);
+  return c.body(md);
 });
 
 app.put("/api/chats/:id", async (c) => {
@@ -664,14 +759,19 @@ app.put("/api/chats/:id", async (c) => {
     messages?: unknown;
   };
   if (!Array.isArray(body.messages)) return c.json({ error: "Bad request" }, 400);
-  const messages = body.messages.filter(
-    (m): m is { id: string; role: "user" | "assistant"; content: string; createdAt: number } =>
+  // Validate required fields, but preserve every allowed extra field so
+  // features like usage/pendingApproval/undoContent/sources/steps survive
+  // the client-side title-sync PUT.
+  const messages = (body.messages as unknown[]).filter((raw): raw is ChatMessage => {
+    const m = raw as Record<string, unknown>;
+    return (
       Boolean(m) &&
-      typeof (m as { id?: unknown }).id === "string" &&
-      ((m as { role?: unknown }).role === "user" || (m as { role?: unknown }).role === "assistant") &&
-      typeof (m as { content?: unknown }).content === "string" &&
-      typeof (m as { createdAt?: unknown }).createdAt === "number",
-  );
+      typeof m.id === "string" &&
+      (m.role === "user" || m.role === "assistant") &&
+      typeof m.content === "string" &&
+      typeof m.createdAt === "number"
+    );
+  }) as ChatMessage[];
   try {
     const saved = await saveChat(id, {
       title: typeof body.title === "string" ? body.title : undefined,
@@ -890,6 +990,61 @@ app.post("/api/chats/:id/jobs/:jobId/retry", async (c) => {
   const result = await retryChatJob(chatId, jobId);
   if (!result) return c.json({ error: "Job not found" }, 404);
   return c.json(result);
+});
+
+app.post("/api/chats/:id/messages/:messageId/edit", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { content?: unknown };
+  if (typeof body.content !== "string") return c.json({ error: "Bad request" }, 400);
+  try {
+    const saved = await editUserMessage(c.req.param("id"), c.req.param("messageId"), body.content);
+    if (!saved) return c.json({ error: "Message not found" }, 404);
+    return c.json(saved);
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : "Could not edit message" }, 400);
+  }
+});
+
+app.post("/api/chats/:id/fork", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { messageId?: unknown };
+  if (typeof body.messageId !== "string") return c.json({ error: "Bad request" }, 400);
+  const forked = await forkChat(c.req.param("id"), body.messageId);
+  if (!forked) return c.json({ error: "Message not found" }, 404);
+  broadcaster.emitEvent({ type: "chats" });
+  return c.json(forked);
+});
+
+app.post("/api/chats/:id/approvals/:approvalId", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { approve?: unknown };
+  if (typeof body.approve !== "boolean") return c.json({ error: "Bad request" }, 400);
+  const msg = await resolveChatApproval(c.req.param("id"), c.req.param("approvalId"), body.approve);
+  if (!msg) return c.json({ error: "Approval not found" }, 404);
+  return c.json(msg);
+});
+
+app.get("/api/personas", async (c) => {
+  return c.json(await listPersonas());
+});
+
+app.put("/api/chats/:id/settings", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    modelId?: unknown;
+    personaId?: unknown;
+    temperature?: unknown;
+  };
+  const patch: { modelId?: string | null; personaId?: string | null; temperature?: number | null } = {};
+  if (typeof body.modelId === "string" || body.modelId === null) patch.modelId = body.modelId;
+  if (typeof body.personaId === "string" || body.personaId === null) patch.personaId = body.personaId;
+  if (
+    typeof body.temperature === "number" && Number.isFinite(body.temperature) && body.temperature >= 0 && body.temperature <= 2
+  ) {
+    patch.temperature = body.temperature;
+  } else if (body.temperature === null) {
+    patch.temperature = null;
+  }
+  const updated = await updateChatSettings(c.req.param("id"), patch);
+  if (!updated) return c.json({ error: "Chat not found" }, 404);
+  broadcaster.emitEvent({ type: "chats" });
+  return c.json(updated);
 });
 
 /* ------------------------------------------------------------------ */

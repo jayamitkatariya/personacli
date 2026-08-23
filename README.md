@@ -159,6 +159,7 @@ appear in the sidebar untouched, and the welcome note is only created once.
 | `persona search "query"` | Search files and tasks from the terminal (fuzzy + semantic) |
 | `persona path` | Print the current workspace path |
 | `persona doctor` | Health check: node, workspace, server, AI config |
+| `persona mcp` | Run Persona as an MCP server (stdio) for Claude Code, Hermes, Cursor, etc. See `docs/mcp.md` |
 
 ## What lives where
 
@@ -318,6 +319,7 @@ Ad-hoc test scripts (need a build first):
 ```sh
 npm run build
 node scripts/tool-test.mjs       # unit-level tests for AI tools, tasks, fs
+node scripts/mcp-test.mjs        # E2E: MCP server via stdio (Persona tools over MCP)
 node scripts/e2e-chat-test.mjs   # E2E: AI chat performs file & task operations
 node scripts/e2e-chat2-test.mjs  # E2E: chat reads notes and cites sources
 ```
@@ -325,6 +327,20 @@ node scripts/e2e-chat2-test.mjs  # E2E: chat reads notes and cites sources
 The E2E scripts expect a server to be running against a throwaway workspace
 (e.g. `HOME=$PWD/.testhome npm run dev:server` on another terminal, so the
 server's config lands in `.testhome/.persona/`).
+
+## MCP — use Persona from Claude Code, Hermes, Cursor, etc.
+
+Persona is an MCP server. Any MCP client can read/write your workspace:
+
+```sh
+persona mcp --help
+claude mcp add persona -- persona mcp   # Claude Code
+# Hermes/Cursor/Windsurf: { "mcpServers": { "persona": { "command": "persona", "args": ["mcp"] } } }
+```
+
+Tools: 15 (`list_folder`, `read_note`, `create_note`, `write_note`, `append_note`, `create_folder`, `move_file`, `rename_file`, `delete_file`, `list_tasks`, `create_task`, `update_task`, `delete_task`, `search`, `get_workspace_info`) + resources (`persona://workspace`, `persona://file/{path}`) + Streamable HTTP at `http://127.0.0.1:4321/mcp`.
+
+Full setup → `docs/mcp.md`.
 
 ## Contributing
 

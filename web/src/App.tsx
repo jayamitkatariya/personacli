@@ -100,7 +100,21 @@ export default function App() {
         else if (payload.type === "chats") {
           void refreshChats();
           const chatId = useStore.getState().currentChatId;
-          if (chatId) void api.getChat(chatId).then((c) => useStore.setState({ messages: c.messages })).catch(() => {});
+          if (chatId) {
+            void api
+              .getChat(chatId)
+              .then((c) =>
+                useStore.setState({
+                  messages: c.messages,
+                  chatSettings: {
+                    modelId: c.modelId ?? null,
+                    personaId: c.personaId ?? null,
+                    temperature: c.temperature ?? null,
+                  },
+                }),
+              )
+              .catch(() => {});
+          }
         } else if (payload.type === "pins") void refreshPins();
         else if (payload.type === "settings") {
           void reloadSettings();

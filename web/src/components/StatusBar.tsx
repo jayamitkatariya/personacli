@@ -39,6 +39,18 @@ export default function StatusBar() {
   const needsAi = !settings?.ai.hasKey && !settings?.ai.local?.model;
 
   const hasActiveChat = chatMessages.some((m) => m.role === "assistant" && (m.status === "queued" || m.status === "streaming"));
+  const chatTokens = chatMessages.reduce(
+    (acc, m) => {
+      if (m.usage) {
+        acc.prompt += m.usage.promptTokens;
+        acc.completion += m.usage.completionTokens;
+      }
+      return acc;
+    },
+    { prompt: 0, completion: 0 },
+  );
+  const showChatTokens = view === "chat" && !hasActiveChat && (chatTokens.prompt > 0 || chatTokens.completion > 0);
+  const formatTokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n));
   let right = "";
   if (view === "write" && doc) {
     right =
@@ -55,6 +67,9 @@ export default function StatusBar() {
       : settings?.ai.model
         ? `${settings?.ai.provider} · ${settings?.ai.model}`
         : settings?.ai.provider ?? "";
+    if (showChatTokens) {
+      right += ` · ${formatTokens(chatTokens.prompt)} in / ${formatTokens(chatTokens.completion)} out`;
+    }
   } else if (view === "tasks") {
     right = `${tasks.length} task${tasks.length === 1 ? "" : "s"}`;
   } else if (view === "today") {
@@ -81,6 +96,11 @@ export default function StatusBar() {
         )}
         <span
           key={flash}
+          title={
+            showChatTokens
+              ? `${chatTokens.prompt.toLocaleString("en-US")} prompt · ${chatTokens.completion.toLocaleString("en-US")} completion tokens`
+              : undefined
+          }
           className={
             doc?.status === "conflict"
               ? "text-amber-600 font-medium"

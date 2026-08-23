@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import type { ChatBackend, Density, FontFamily, ModuleKey } from "../shared/types.js";
+import type { ChatBackend, Density, FontFamily, ModuleKey, ToolApprovalMode } from "../shared/types.js";
 
 export type ThemeSetting = "light" | "dark" | "system";
 
@@ -40,6 +40,8 @@ export interface ConfigFile {
     profiles?: Array<{ id: string; label: string; provider?: string; baseUrl?: string; model?: string; apiKey?: string }>;
     defaultModelId?: string | null;
     backupModelId?: string | null;
+    /** Destructive tool calls: "ask" requires user approval, "auto" runs them. */
+    toolApproval?: ToolApprovalMode;
   };
 }
 

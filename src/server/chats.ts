@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { getWorkspace } from "./state.js";
 import type { ChatMessage, ChatMeta, ChatSearchHit, ChatTranscript } from "../shared/types.js";
 
@@ -9,6 +9,10 @@ export interface ChatTranscriptFile {
   createdAt: number;
   updatedAt: number;
   messages: ChatMessage[];
+  /** Per-chat AI overrides. null = follow global settings. */
+  modelId?: string | null;
+  personaId?: string | null;
+  temperature?: number | null;
 }
 
 function chatsDirPath(): string {
@@ -71,13 +75,28 @@ export async function getChat(id: string): Promise<ChatTranscript | null> {
     const raw = await readFile(fileFor(id), "utf8");
     const parsed = JSON.parse(raw) as ChatTranscriptFile;
     if (!parsed || !parsed.id) return null;
-    return { ...toMeta(parsed), messages: parsed.messages };
+    return {
+      ...toMeta(parsed),
+      messages: parsed.messages,
+      modelId: parsed.modelId ?? null,
+      personaId: parsed.personaId ?? null,
+      temperature: parsed.temperature ?? null,
+    };
   } catch {
     return null;
   }
 }
 
-export async function saveChat(id: string, input: { title?: string; messages: ChatMessage[] }): Promise<ChatTranscript> {
+export async function saveChat(
+  id: string,
+  input: {
+    title?: string;
+    messages: ChatMessage[];
+    modelId?: string | null;
+    personaId?: string | null;
+    temperature?: number | null;
+  },
+): Promise<ChatTranscript> {
   if (!safeId(id)) throw new Error("Invalid chat id");
   const dir = await ensureChatsDir();
   const existing = await getChat(id);
@@ -88,11 +107,49 @@ export async function saveChat(id: string, input: { title?: string; messages: Ch
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
     messages: input.messages,
+    // Settings survive partial saves; only an explicit value changes them.
+    modelId: input.modelId !== undefined ? input.modelId : existing?.modelId ?? null,
+    personaId: input.personaId !== undefined ? input.personaId : existing?.personaId ?? null,
+    temperature:
+      input.temperature !== undefined
+        ? input.temperature
+        : existing?.temperature ?? null,
   };
   await mkdir(dir, { recursive: true });
-  await writeFile(fileFor(id), JSON.stringify(transcript, null, 2), "utf8");
+  const target = fileFor(id);
+  const tmp = `${target}.tmp.${Date.now()}.${Math.random().toString(36).slice(2, 6)}`;
+  await writeFile(tmp, JSON.stringify(transcript, null, 2), "utf8");
+  await rename(tmp, target);
   
-  return { ...toMeta(transcript), messages: transcript.messages };
+  return {
+    ...toMeta(transcript),
+    messages: transcript.messages,
+    modelId: transcript.modelId ?? null,
+    personaId: transcript.personaId ?? null,
+    temperature: transcript.temperature ?? null,
+  };
+}
+
+/** Update only the per-chat AI overrides; returns the full transcript or null. */
+export async function updateChatSettings(
+  id: string,
+  patch: { modelId?: string | null; personaId?: string | null; temperature?: number | null },
+): Promise<ChatTranscript | null> {
+  const chat = await getChat(id);
+  if (!chat) return null;
+  const saved = await saveChat(id, { title: chat.title, messages: chat.messages, ...patch });
+  return saved;
+}
+
+/** Copy a conversation up to (and including) one message into a brand-new chat. */
+export async function forkChat(id: string, messageId: string): Promise<ChatTranscript | null> {
+  const src = await getChat(id);
+  if (!src) return null;
+  const idx = src.messages.findIndex((m) => m.id === messageId);
+  if (idx === -1) return null;
+  const newId = `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const messages = src.messages.slice(0, idx + 1).map((m) => ({ ...m }));
+  return saveChat(newId, { title: `${src.title.slice(0, 72)} (fork)`, messages });
 }
 
 export async function deleteChat(id: string): Promise<boolean> {

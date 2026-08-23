@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import type { ChatCompletionCreateParamsStreaming, ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { format } from "date-fns";
 import { getApiKey } from "./keychain.js";
 import { readConfig } from "./state.js";
@@ -94,13 +94,24 @@ export async function resolveAiConfig(): Promise<AiConfig> {
   return { ...DEFAULT_REMOTE, local: false, backend, localDetected };
 }
 
+/** Upper bound for a single attached file's inlined content (~12k tokens). */
+const MAX_CONTEXT_CHARS = 50_000;
+
+function capContext(content: string): string {
+  if (content.length <= MAX_CONTEXT_CHARS) return content;
+  return (
+    content.slice(0, MAX_CONTEXT_CHARS) +
+    `\n[Truncated: showing the first ${MAX_CONTEXT_CHARS.toLocaleString("en-US")} of ${content.length.toLocaleString("en-US")} characters]`
+  );
+}
+
 export async function resolveContext(targets: ContextTarget[]): Promise<string> {
   const blocks: string[] = [];
   for (const target of targets) {
     try {
       if (target.type === "file") {
         const content = await readFileContent(target.path);
-        blocks.push(`<file path="${target.path}">\n${content}\n</file>`);
+        blocks.push(`<file path="${target.path}">\n${capContext(content)}\n</file>`);
       } else if (target.type === "folder") {
         const tree = await readTree(target.path);
         const names = tree.map((n) => `${n.type === "folder" ? "dir" : "file"} ${n.path}`).join("\n");
@@ -153,6 +164,9 @@ export interface StreamOptions {
 }
 
 const MAX_TOOL_ROUNDS = 24;
+
+/** Tools that change or remove existing data — gated behind user approval. */
+export const DESTRUCTIVE_TOOLS = new Set(["write_note", "delete_file", "move_file", "rename_file", "delete_task"]);
 
 function toApiMessage(m: ChatMessage): ChatCompletionMessageParam {
   if (m.role === "user" && m.images && m.images.length > 0) {
@@ -246,8 +260,17 @@ export interface AgenticLoopOptions {
   onDelta?: (text: string) => void;
   onTool?: (name: string, status: "start" | "done", detail?: string) => void | Promise<void>;
   onCitations?: (sources: ChatSource[]) => void;
+  /** Reported once per model round when the provider includes usage. */
+  onUsage?: (usage: { promptTokens: number; completionTokens: number }) => void;
+  /**
+   * Called before a destructive tool runs; resolve false to deny (the model
+   * is told the user declined). Omitted → tools run without asking.
+   */
+  requestApproval?: (tool: string, args: Record<string, unknown>) => Promise<boolean>;
   signal?: AbortSignal;
   maxRounds?: number;
+  /** Optional sampling temperature override (per-chat setting). */
+  temperature?: number;
 }
 
 /**
@@ -265,11 +288,18 @@ export async function runAgenticLoop(
 
   for (let round = 0; round < maxRounds; round++) {
     let stream: Awaited<ReturnType<typeof client.chat.completions.create>>;
+    const body: ChatCompletionCreateParamsStreaming = {
+      model,
+      stream: true,
+      messages,
+      tools: useTools ? toolDefs : undefined,
+    };
+    // Cloud providers report token usage on the final streamed chunk when
+    // asked; some local compat servers reject the option, so only send it there.
+    if (!usingLocal) body.stream_options = { include_usage: true };
+    if (options.temperature !== undefined) body.temperature = options.temperature;
     try {
-      stream = await client.chat.completions.create(
-        { model, stream: true, messages, tools: useTools ? toolDefs : undefined },
-        { signal },
-      );
+      stream = await client.chat.completions.create(body, { signal });
     } catch (err) {
       if (signal?.aborted || (err instanceof Error && err.name === "AbortError")) {
         throw err;
@@ -298,6 +328,12 @@ export async function runAgenticLoop(
         text += delta.content;
         fullText += delta.content;
         options.onDelta?.(delta.content);
+      }
+      if (chunk.usage && options.onUsage) {
+        options.onUsage({
+          promptTokens: chunk.usage.prompt_tokens ?? 0,
+          completionTokens: chunk.usage.completion_tokens ?? 0,
+        });
       }
       if (delta?.tool_calls) {
         for (const tc of delta.tool_calls) {
@@ -336,6 +372,15 @@ export async function runAgenticLoop(
       try {
         await options.onTool?.(call.function.name, "start");
         const args = JSON.parse(call.function.arguments || "{}") as Record<string, unknown>;
+        if (options.requestApproval && DESTRUCTIVE_TOOLS.has(call.function.name)) {
+          const approved = await options.requestApproval(call.function.name, args);
+          if (!approved) {
+            result = "The user declined this action. Do not retry it — acknowledge and move on.";
+            await options.onTool?.(call.function.name, "done", result);
+            messages.push({ role: "tool", tool_call_id: call.id, content: result });
+            continue;
+          }
+        }
         result = await executeTool(call.function.name, args);
         if (call.function.name === "read_note" && typeof args.path === "string" && args.path) {
           sources.set(args.path, result);

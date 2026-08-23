@@ -18,6 +18,15 @@ import {
   Languages,
   MessageCircle,
   TextQuote,
+  RefreshCw,
+  Pencil,
+  GitFork,
+  PenLine,
+  Cpu,
+  ShieldAlert,
+  FolderOpen,
+  Thermometer,
+  ChevronDown,
 } from "lucide-react";
 import { useStore } from "../state/store";
 import { api, streamTransform } from "../lib/api";
@@ -132,7 +141,29 @@ export default function ChatView() {
   const [listening, setListening] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [rewriting, setRewriting] = useState<{ id: string; abort: AbortController } | null>(null);
-  const [rewriteUndo, setRewriteUndo] = useState<Record<string, string>>({});
+  const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const failedEnqueues = useStore((s) => s.failedEnqueues);
+  const personas = useStore((s) => s.personas);
+  const chatSettings = useStore((s) => s.chatSettings);
+  const setChatSettings = useStore((s) => s.setChatSettings);
+
+  const profiles = settings?.ai.profiles ?? [];
+  const activePersonaId = chatSettings.personaId ?? "default";
+  const activePersonaName = personas.find((p) => p.id === activePersonaId)?.name ?? "Default";
+  const activeModelLabel = chatSettings.modelId
+    ? (profiles.find((p) => p.id === chatSettings.modelId)?.label ?? "Custom model")
+    : "Auto";
+  const tempPresets = [
+    { value: null, label: "Auto" },
+    { value: 0, label: "0 · precise" },
+    { value: 0.3, label: "0.3" },
+    { value: 0.7, label: "0.7" },
+    { value: 1, label: "1 · wild" },
+  ] as const;
+  const activeTemp = tempPresets.find((t) =>
+    t.value === null ? chatSettings.temperature == null : t.value === chatSettings.temperature,
+  );
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const sendingRef = useRef(false);
@@ -391,9 +422,16 @@ export default function ChatView() {
     void refreshTasks();
   };
 
-  const stop = () => {
-    const lastStreaming = [...messages].reverse().find((m) => m.role === "assistant" && m.status === "streaming");
-    if (lastStreaming) void useStore.getState().cancelChatJob(lastStreaming.id);
+  const stop = async () => {
+    const targets = messages.filter((m) => m.role === "assistant" && (m.status === "queued" || m.status === "streaming"));
+    // Splice queued items out first; aborting the live run kicks the next
+    // pending job, and by then there is nothing left to kick.
+    for (const m of targets) {
+      if (m.status === "queued") await useStore.getState().cancelChatJob(m.id);
+    }
+    for (const m of targets) {
+      if (m.status === "streaming") void useStore.getState().cancelChatJob(m.id);
+    }
     void refreshTree();
     void refreshTasks();
     inputRef.current?.focus();
@@ -405,7 +443,7 @@ export default function ChatView() {
   const rewriteMessage = (msg: { id: string; content: string }, mode: TransformMode, lang?: string) => {
     if (rewriting || hasQueuedOrStreaming || !msg.content.trim()) return;
     const original = msg.content;
-    setRewriteUndo((prev) => ({ ...prev, [msg.id]: original }));
+    void useStore.getState().persistMessageUndo(msg.id, original);
     const controller = new AbortController();
     setRewriting({ id: msg.id, abort: controller });
     let acc = "";
@@ -421,22 +459,16 @@ export default function ChatView() {
           setRewriting(null);
           sounds.done();
           if (acc.trim() === original.trim()) {
-            setRewriteUndo((prev) => {
-              const next = { ...prev };
-              delete next[msg.id];
-              return next;
-            });
+            void useStore.getState().persistMessageUndo(msg.id, null);
+          } else {
+            void useStore.getState().persistMessages();
           }
         },
         onError: (message) => {
           setRewriting(null);
           setError(message);
           updateMessage(msg.id, original);
-          setRewriteUndo((prev) => {
-            const next = { ...prev };
-            delete next[msg.id];
-            return next;
-          });
+          void useStore.getState().persistMessageUndo(msg.id, null);
         },
       },
       { lang, signal: controller.signal },
@@ -445,19 +477,32 @@ export default function ChatView() {
       if ((e as Error).name !== "AbortError") {
         setError((e as Error).message);
         updateMessage(msg.id, original);
+        void useStore.getState().persistMessageUndo(msg.id, null);
       }
     });
   };
 
   const undoRewrite = (msgId: string) => {
-    const prev = rewriteUndo[msgId];
-    if (prev === undefined) return;
+    const msg = messages.find((m) => m.id === msgId);
+    const prev = msg?.undoContent;
+    if (!prev) return;
     updateMessage(msgId, prev);
-    setRewriteUndo((prevMap) => {
-      const next = { ...prevMap };
-      delete next[msgId];
-      return next;
-    });
+    void useStore.getState().persistMessageUndo(msgId, null);
+  };
+
+  const saveEdit = async (msg: { id: string; content: string }) => {
+    if (!editing || editing.id !== msg.id || sendingRef.current) return;
+    const draft = editing.draft.trim();
+    if (!draft || draft === msg.content.trim()) {
+      setEditing(null);
+      return;
+    }
+    sendingRef.current = true;
+    setEditing(null);
+    const ok = await useStore.getState().editChatMessage(msg.id, draft);
+    sendingRef.current = false;
+    if (!ok) setError("Could not edit that message — it may still be running.");
+    inputRef.current?.focus();
   };
 
   const aiReady = (() => {
@@ -551,35 +596,89 @@ export default function ChatView() {
             {messages.map((msg) => (
               <div key={msg.id} className="space-y-1.5 msg-in">
                 {msg.role === "user" ? (
-                  <div className="flex justify-end">
-                    <div className="bubble-gradient max-w-[85%] text-white rounded-2xl rounded-br-md px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap shadow-sm shadow-blue-600/20">
-                      {msg.content}
-                      {msg.images && msg.images.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {msg.images.map((src, i) => (
-                            <img
-                              key={i}
-                              src={src}
-                              alt={`Attached image ${i + 1}`}
-                              className="w-16 h-16 object-cover rounded-lg bg-white/20 ring-1 ring-white/30"
-                            />
-                          ))}
+                  <div className="flex justify-end items-center gap-1.5 group/msg">
+                    {editing?.id === msg.id ? (
+                      <div className="w-full max-w-[85%]">
+                        <textarea
+                          autoFocus
+                          value={editing.draft}
+                          rows={Math.min(8, Math.max(2, editing.draft.split("\n").length))}
+                          onChange={(e) => setEditing((prev) => (prev ? { ...prev, draft: e.target.value } : prev))}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                              e.preventDefault();
+                              void saveEdit(msg);
+                            }
+                            if (e.key === "Escape") setEditing(null);
+                          }}
+                          className="w-full rounded-2xl rounded-br-md border border-blue-300 dark:border-blue-800 bg-white dark:bg-stone-800 px-4 py-2.5 text-[13.5px] leading-relaxed outline-none resize-none shadow-sm"
+                        />
+                        <div className="mt-1 flex justify-end gap-1.5">
+                          <button
+                            onClick={() => setEditing(null)}
+                            className="px-2.5 py-1 rounded-md text-[11.5px] text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={() => void saveEdit(msg)}
+                            disabled={!editing.draft.trim()}
+                            className="px-2.5 py-1 rounded-md text-[11.5px] bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40"
+                          >
+                            Save &amp; re-run
+                          </button>
                         </div>
-                      )}
-                      {msg.contexts && msg.contexts.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-1">
-                          {msg.contexts.map((c, i) => (
-                            <span
-                              key={i}
-                              className="flex items-center gap-1 text-[11px] bg-white/20 rounded-full px-2 py-0.5"
+                      </div>
+                    ) : (
+                      <>
+                        {!hasQueuedOrStreaming && (
+                          <div className="flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity">
+                            <button
+                              onClick={() => setEditing({ id: msg.id, draft: msg.content })}
+                              title="Edit & re-run"
+                              className="p-1 rounded-md text-stone-400 dark:text-stone-500 hover:text-blue-600 hover:bg-stone-100 dark:hover:bg-stone-800"
                             >
-                              {contextIcon(c)}
-                              {c.type === "tasks" ? "Tasks" : c.path}
-                            </span>
-                          ))}
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => void useStore.getState().forkChatAt(msg.id)}
+                              title="Fork conversation from here"
+                              className="p-1 rounded-md text-stone-400 dark:text-stone-500 hover:text-blue-600 hover:bg-stone-100 dark:hover:bg-stone-800"
+                            >
+                              <GitFork className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+                        <div className="bubble-gradient max-w-[85%] text-white rounded-2xl rounded-br-md px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap shadow-sm shadow-blue-600/20">
+                          {msg.content}
+                          {msg.images && msg.images.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {msg.images.map((src, i) => (
+                                <img
+                                  key={i}
+                                  src={src}
+                                  alt={`Attached image ${i + 1}`}
+                                  className="w-16 h-16 object-cover rounded-lg bg-white/20 ring-1 ring-white/30"
+                                />
+                              ))}
+                            </div>
+                          )}
+                          {msg.contexts && msg.contexts.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {msg.contexts.map((c, i) => (
+                                <span
+                                  key={i}
+                                  className="flex items-center gap-1 text-[11px] bg-white/20 rounded-full px-2 py-0.5"
+                                >
+                                  {contextIcon(c)}
+                                  {c.type === "tasks" ? "Tasks" : c.path}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
+                      </>
+                    )}
                   </div>
                 ) : (
                   <div className="flex justify-start">
@@ -595,7 +694,7 @@ export default function ChatView() {
                               <Loader2 className="w-3.5 h-3.5 animate-spin" />
                             </button>
                           )}
-                          {rewriteUndo[msg.id] !== undefined && rewriting?.id !== msg.id && (
+                          {msg.undoContent && rewriting?.id !== msg.id && (
                             <button
                               onClick={() => undoRewrite(msg.id)}
                               title="Undo rewrite"
@@ -689,6 +788,24 @@ export default function ChatView() {
                               </DropdownMenu.Portal>
                             </DropdownMenu.Root>
                           )}
+                          {(msg.status === "done" || msg.status === "cancelled") && !hasQueuedOrStreaming && rewriting?.id !== msg.id && (
+                            <button
+                              onClick={() => void useStore.getState().retryChatJob(msg.id)}
+                              title="Regenerate this response"
+                              className="p-1 rounded-md text-stone-400 dark:text-stone-500 hover:text-blue-600 hover:bg-stone-100 dark:hover:bg-stone-800"
+                            >
+                              <RefreshCw className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {!hasQueuedOrStreaming && (
+                            <button
+                              onClick={() => void useStore.getState().forkChatAt(msg.id)}
+                              title="Fork conversation from here"
+                              className="p-1 rounded-md text-stone-400 dark:text-stone-500 hover:text-blue-600 hover:bg-stone-100 dark:hover:bg-stone-800"
+                            >
+                              <GitFork className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           <CopyButton text={msg.content} />
                         </div>
                       )}
@@ -738,13 +855,49 @@ export default function ChatView() {
                             ))}
                           </div>
                         )}
+                        {msg.pendingApproval && (
+                          <div className="mt-2 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 p-3">
+                            <div className="flex items-center gap-1.5 text-[12px] font-medium text-amber-800 dark:text-amber-200">
+                              <ShieldAlert className="w-3.5 h-3.5" />
+                              Persona wants to {toolLabel(msg.pendingApproval.tool)} — approve?
+                            </div>
+                            <div className="mt-1.5 font-mono text-[11px] text-stone-600 dark:text-stone-400 break-all">
+                              {Object.entries(msg.pendingApproval.args)
+                                .map(([k, v]) => `${k}="${String(v).slice(0, 200)}"`)
+                                .join("  ") || "(no arguments)"}
+                            </div>
+                            <div className="mt-2.5 flex gap-2">
+                              <button
+                                onClick={() => void api.resolveChatApproval(currentChatId!, msg.pendingApproval!.id, true)}
+                                className="px-3 py-1 rounded-md bg-amber-600 text-white text-[11.5px] font-medium hover:bg-amber-700 transition-colors"
+                              >
+                                Approve
+                              </button>
+                              <button
+                                onClick={() => void api.resolveChatApproval(currentChatId!, msg.pendingApproval!.id, false)}
+                                className="px-3 py-1 rounded-md border border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-800 text-stone-700 dark:text-stone-300 text-[11.5px] hover:bg-stone-50 dark:hover:bg-stone-700 transition-colors"
+                              >
+                                Deny
+                              </button>
+                            </div>
+                          </div>
+                        )}
                         {msg.status === "queued" && (
                           <div className="mt-1 text-[11px] text-stone-400">Queued — will run after the current job.</div>
                         )}
                         {msg.status === "failed" && msg.error && (
                           <div className="mt-2 text-[12px] text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 flex items-center justify-between gap-2">
                             <span>{msg.error}</span>
-                            <button onClick={() => void useStore.getState().retryChatJob(msg.id)} className="px-2 py-1 rounded bg-white border text-stone-700">Retry</button>
+                            <button
+                              onClick={() =>
+                                void (failedEnqueues[msg.id]
+                                  ? useStore.getState().resendFailedChat(msg.id)
+                                  : useStore.getState().retryChatJob(msg.id))
+                              }
+                              className="px-2 py-1 rounded bg-white border text-stone-700"
+                            >
+                              Retry
+                            </button>
                           </div>
                         )}
                       </div>
@@ -768,6 +921,129 @@ export default function ChatView() {
 
       <div className="shrink-0 pb-4 pt-2 px-4">
         <div className="max-w-[760px] mx-auto">
+          <div className="mb-2 flex items-center gap-1.5">
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <button
+                  title="Persona — how the assistant should behave"
+                  className="flex items-center gap-1.5 rounded-md border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 px-2 py-1 text-[11px] text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:border-stone-300 dark:hover:border-stone-600 transition-colors"
+                >
+                  <PenLine className="w-3 h-3" />
+                  {activePersonaName}
+                  <ChevronDown className="w-3 h-3 opacity-50" />
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  align="start"
+                  sideOffset={4}
+                  className="min-w-[170px] bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg shadow-lg shadow-stone-900/5 p-1 z-50 text-[13px]"
+                >
+                  {personas.map((p) => (
+                    <DropdownMenu.Item
+                      key={p.id}
+                      onSelect={() => void setChatSettings({ personaId: p.id })}
+                      title={p.prompt || undefined}
+                      className="px-2.5 py-1.5 rounded-md cursor-pointer outline-none text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-700/60 focus:bg-stone-100 dark:focus:bg-stone-700/60 flex items-center justify-between gap-3"
+                    >
+                      <span>
+                        {p.name}
+                        {!p.builtin && <span className="ml-1.5 text-[10px] text-stone-400">custom</span>}
+                      </span>
+                      {(chatSettings.personaId ?? "default") === p.id && (
+                        <Check className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                      )}
+                    </DropdownMenu.Item>
+                  ))}
+                  <div className="px-2.5 py-1 text-[10px] text-stone-400 border-t border-stone-100 dark:border-stone-700 mt-1">
+                    Add your own in .persona/personas/
+                  </div>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <button
+                  title="Model for this conversation"
+                  className="flex items-center gap-1.5 rounded-md border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 px-2 py-1 text-[11px] text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:border-stone-300 dark:hover:border-stone-600 transition-colors"
+                >
+                  <Cpu className="w-3 h-3" />
+                  {activeModelLabel}
+                  <ChevronDown className="w-3 h-3 opacity-50" />
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  align="start"
+                  sideOffset={4}
+                  className="min-w-[180px] bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg shadow-lg shadow-stone-900/5 p-1 z-50 text-[13px] max-h-64 overflow-y-auto"
+                >
+                  <button
+                    onClick={() => void setChatSettings({ modelId: null })}
+                    className={`w-full px-2.5 py-1.5 rounded-md cursor-pointer outline-none text-left flex items-center justify-between gap-3 ${
+                      !chatSettings.modelId
+                        ? "text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/40"
+                        : "text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-700/60"
+                    }`}
+                  >
+                    Auto (global default)
+                    {!chatSettings.modelId && <Check className="w-3 h-3 text-blue-600 dark:text-blue-400" />}
+                  </button>
+                  {profiles.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => void setChatSettings({ modelId: p.id })}
+                      className={`w-full px-2.5 py-1.5 rounded-md cursor-pointer outline-none text-left flex items-center justify-between gap-3 ${
+                        chatSettings.modelId === p.id
+                          ? "text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/40"
+                          : "text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-700/60"
+                      }`}
+                    >
+                      <span className="truncate">{p.label}</span>
+                      {chatSettings.modelId === p.id && <Check className="w-3 h-3 shrink-0 text-blue-600 dark:text-blue-400" />}
+                    </button>
+                  ))}
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <button
+                  title="Temperature for this conversation"
+                  className="flex items-center gap-1.5 rounded-md border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 px-2 py-1 text-[11px] text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:border-stone-300 dark:hover:border-stone-600 transition-colors"
+                >
+                  <Thermometer className="w-3 h-3" />
+                  Temp · {activeTemp?.label ?? "Auto"}
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  align="start"
+                  sideOffset={4}
+                  className="min-w-[140px] bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg shadow-lg shadow-stone-900/5 p-1 z-50 text-[13px]"
+                >
+                  {tempPresets.map((t) => {
+                    const active = t.value === null ? chatSettings.temperature == null : t.value === chatSettings.temperature;
+                    return (
+                      <DropdownMenu.Item
+                        key={t.label}
+                        onSelect={() => void setChatSettings({ temperature: t.value })}
+                        className="px-2.5 py-1.5 rounded-md cursor-pointer outline-none text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-700/60 focus:bg-stone-100 dark:focus:bg-stone-700/60 flex items-center justify-between gap-3"
+                      >
+                        {t.label}
+                        {active && <Check className="w-3 h-3 text-blue-600 dark:text-blue-400" />}
+                      </DropdownMenu.Item>
+                    );
+                  })}
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+
+            <div className="flex-1" />
+          </div>
+
           {contexts.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mb-2">
               {contexts.map((c, i) => (
@@ -794,7 +1070,33 @@ export default function ChatView() {
             </div>
           )}
 
-          <div className="focus-aura rounded-2xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 shadow-sm transition-shadow focus-within:shadow-md focus-within:shadow-stone-900/5">
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+            }}
+            onDrop={async (e) => {
+              e.preventDefault();
+              setDragOver(false);
+              const files = Array.from(e.dataTransfer.files ?? []);
+              for (const file of files) {
+                if (!file.type.startsWith("image/")) continue;
+                try {
+                  const dataUrl = await readImageFile(file);
+                  setPendingImages((prev) => (prev.length >= MAX_IMAGES ? prev : [...prev, dataUrl]));
+                } catch {
+                  // ignore unreadable
+                }
+              }
+            }}
+            className={`focus-aura rounded-2xl border bg-white dark:bg-stone-800 shadow-sm transition-shadow focus-within:shadow-md focus-within:shadow-stone-900/5 ${
+              dragOver ? "border-blue-400 ring-2 ring-blue-200 dark:ring-blue-800" : "border-stone-200 dark:border-stone-700"
+            }`}
+          >
             <div className="relative">
               {mentionQuery !== null && suggestions.length > 0 && (
                 <div className="absolute bottom-full left-0 right-0 mb-2 bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg shadow-lg shadow-stone-900/5 p-1 max-h-56 overflow-y-auto z-10">
@@ -929,7 +1231,7 @@ export default function ChatView() {
                 )}
               </button>
               <button
-                onClick={hasQueuedOrStreaming ? stop : () => void send()}
+                onClick={hasQueuedOrStreaming ? () => void stop() : () => void send()}
                 disabled={!hasQueuedOrStreaming && !input.trim() && pendingImages.length === 0}
                 className={`p-1.5 rounded-md disabled:opacity-40 disabled:cursor-default ${
                   hasQueuedOrStreaming
@@ -948,7 +1250,16 @@ export default function ChatView() {
           </div>
 
           {messages.length > 0 && !hasQueuedOrStreaming && (
-            <div className="mt-2 flex justify-end">
+            <div className="mt-2 flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  const id = useStore.getState().currentChatId;
+                  if (id) void api.exportChat(id).catch((e) => setError((e as Error).message));
+                }}
+                className="flex items-center gap-1 text-[11px] text-stone-400 dark:text-stone-500 hover:text-stone-700"
+              >
+                <FolderOpen className="w-3 h-3" /> Export
+              </button>
               <button
                 onClick={() => {
                   if (confirm("Clear this conversation? It will be removed from your chat history.")) {

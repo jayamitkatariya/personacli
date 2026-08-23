@@ -2,10 +2,12 @@ import { create } from "zustand";
 import type {
   ChatMessage,
   ChatMeta,
+  ChatSettingsInput,
   ChatSource,
   ContextTarget,
   FileKind,
   ModuleSettings,
+  Persona,
   Pinboard,
   Settings,
   Task,
@@ -13,6 +15,15 @@ import type {
 } from "../../../src/shared/types";
 import { fileKind } from "../../../src/shared/types";
 import { api } from "../lib/api";
+
+/** Extract per-chat AI overrides from a fetched transcript. */
+function chatSettingsOf(chat: { modelId?: string | null; personaId?: string | null; temperature?: number | null }): ChatSettingsInput {
+  return {
+    modelId: chat.modelId ?? null,
+    personaId: chat.personaId ?? null,
+    temperature: chat.temperature ?? null,
+  };
+}
 
 export type View = "write" | "tasks" | "chat" | "today";
 export type SaveStatus = "saved" | "saving" | "unsaved" | "conflict";
@@ -77,6 +88,13 @@ interface Store {
   focusOpen: boolean;
   focusSession: FocusSession | null;
   modules: ModuleSettings;
+  /** Payloads of messages that never reached the server — keyed by the
+   *  synthetic assistant bubble id, so their Retry can re-send for real. */
+  failedEnqueues: Record<string, { content: string; contexts: ContextTarget[]; images?: string[] }>;
+  /** Available chat personas (built-ins + .persona/personas/*.md). */
+  personas: Persona[];
+  /** Per-chat AI overrides for the open conversation. */
+  chatSettings: ChatSettingsInput;
 
   boot: () => Promise<void>;
   refreshTree: () => Promise<void>;
@@ -90,6 +108,15 @@ interface Store {
   enqueueChatMessage: (content: string, contexts: ContextTarget[], images?: string[]) => Promise<void>;
   cancelChatJob: (jobId: string) => Promise<void>;
   retryChatJob: (jobId: string) => Promise<void>;
+  resendFailedChat: (jobId: string) => Promise<void>;
+  editChatMessage: (messageId: string, content: string) => Promise<boolean>;
+  forkChatAt: (messageId: string) => Promise<void>;
+  loadPersonas: () => Promise<void>;
+  setChatSettings: (patch: ChatSettingsInput) => Promise<void>;
+  renameChat: (id: string, title: string) => Promise<void>;
+  deleteChat: (id: string) => Promise<void>;
+  persistMessageUndo: (messageId: string, undoContent: string | null) => Promise<void>;
+  persistMessages: () => Promise<void>;
 
   setView: (view: View) => void;
   toggleExpand: (path: string) => void;
@@ -178,6 +205,9 @@ export const useStore = create<Store>((set, get) => ({
   focusOpen: false,
   focusSession: null,
   modules: {},
+  failedEnqueues: {},
+  personas: [],
+  chatSettings: { modelId: null, personaId: null, temperature: null },
 
   boot: async () => {
     const settings = await api.getSettings().catch(() => null);
@@ -194,6 +224,7 @@ export const useStore = create<Store>((set, get) => ({
       get().refreshPins();
       get().refreshChats();
     }
+    void get().loadPersonas();
   },
 
   finishOnboarding: () => set({ onboarding: false, configured: true }),
@@ -233,15 +264,26 @@ export const useStore = create<Store>((set, get) => ({
   enqueueChatMessage: async (content, contexts = [], images) => {
     const state = get();
     let chatId = state.currentChatId;
+    const isNewChat = !chatId;
     if (!chatId) {
       chatId = `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
       set({ currentChatId: chatId });
     }
     try {
       const res = await api.enqueueChat(chatId, content, contexts, images);
+      if (isNewChat) {
+        // Carry pre-chat persona/model picks onto the freshly created chat.
+        const cs = get().chatSettings;
+        if (cs.modelId || cs.personaId || cs.temperature !== null) {
+          void api.updateChatSettings(chatId!, cs).catch(() => {});
+        }
+      }
       const chat = await api.getChat(res.chatId).catch(() => null);
       if (chat) {
-        set({ messages: chat.messages, currentChatId: chat.id });
+        // A brand-new chat keeps the locally picked persona/model until the
+        // settings PUT lands; an existing chat trusts the server.
+        const cs = isNewChat ? get().chatSettings : chatSettingsOf(chat);
+        set({ messages: chat.messages, currentChatId: chat.id, chatSettings: cs });
       } else {
         const userMsg: ChatMessage = { id: res.userId, role: "user", content, contexts: contexts.length ? contexts : undefined, images, createdAt: Date.now() };
         const assistantMsg: ChatMessage = { id: res.assistantId, role: "assistant", content: "", createdAt: Date.now(), status: "queued", steps: [] };
@@ -249,11 +291,104 @@ export const useStore = create<Store>((set, get) => ({
       }
       await get().refreshChats();
     } catch {
-      const assistantId = `a${Date.now()}`;
-      const userMsg: ChatMessage = { id: `u${Date.now()}`, role: "user", content, contexts: contexts.length ? contexts : undefined, images, createdAt: Date.now() };
-      const assistantMsg: ChatMessage = { id: assistantId, role: "assistant", content: "", createdAt: Date.now(), status: "failed" as const, error: "Failed to queue", steps: [] };
-      set((s) => ({ messages: [...s.messages, userMsg, assistantMsg] }));
+      const ts = Date.now();
+      const assistantId = `a${ts}`;
+      set((s) => ({
+        messages: [
+          ...s.messages,
+          { id: `u${ts}`, role: "user", content, contexts: contexts.length ? contexts : undefined, images, createdAt: ts },
+          { id: assistantId, role: "assistant", content: "", createdAt: Date.now(), status: "failed" as const, error: "Failed to queue", steps: [] },
+        ],
+        failedEnqueues: { ...s.failedEnqueues, [assistantId]: { content, contexts, images } },
+      }));
     }
+  },
+
+  resendFailedChat: async (jobId) => {
+    const payload = get().failedEnqueues[jobId];
+    if (!payload) return;
+    set((s) => {
+      const idx = s.messages.findIndex((m) => m.id === jobId);
+      const failedEnqueues = { ...s.failedEnqueues };
+      delete failedEnqueues[jobId];
+      // Drop the synthetic user+assistant pair; re-send creates fresh ones.
+      const messages = idx === -1 ? s.messages : s.messages.filter((_, i) => i !== idx && i !== idx - 1);
+      return { messages, failedEnqueues };
+    });
+    await get().enqueueChatMessage(payload.content, payload.contexts, payload.images);
+  },
+
+  editChatMessage: async (messageId, content) => {
+    const chatId = get().currentChatId;
+    if (!chatId) return false;
+    try {
+      const chat = await api.editChatMessage(chatId, messageId, content);
+      set({ messages: chat.messages, currentChatId: chat.id, chatSettings: chatSettingsOf(chat) });
+      await get().refreshChats();
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  forkChatAt: async (messageId) => {
+    const chatId = get().currentChatId;
+    if (!chatId) return;
+    const chat = await api.forkChat(chatId, messageId).catch(() => null);
+    if (!chat) return;
+    set({ messages: chat.messages, currentChatId: chat.id, chatSettings: chatSettingsOf(chat) });
+    await get().refreshChats();
+  },
+
+  loadPersonas: async () => {
+    const personas = await api.getPersonas().catch(() => []);
+    set({ personas });
+  },
+
+  setChatSettings: async (patch) => {
+    // Optimistic — the composer pickers should react instantly.
+    set((s) => ({ chatSettings: { ...s.chatSettings, ...patch } }));
+    const chatId = get().currentChatId;
+    // With no chat yet, the selection lives locally until the next message
+    // creates one (enqueueChatMessage then persists it).
+    if (!chatId) return;
+    const chat = await api.updateChatSettings(chatId, patch).catch(() => null);
+    if (chat) set({ chatSettings: chatSettingsOf(chat) });
+  },
+
+  renameChat: async (id, title) => {
+    const chat = await api.getChat(id).catch(() => null);
+    if (!chat) return;
+    const nextTitle = title.trim().slice(0, 80) || "Untitled chat";
+    await api.saveChat(id, nextTitle, chat.messages).catch(() => {});
+    await get().refreshChats();
+  },
+
+  deleteChat: async (id) => {
+    await api.deleteChat(id).catch(() => {});
+    const current = get().currentChatId;
+    if (current === id) {
+      set({ messages: [], currentChatId: null, failedEnqueues: {}, chatSettings: { modelId: null, personaId: null, temperature: null } });
+    }
+    await get().refreshChats();
+  },
+
+  persistMessageUndo: async (messageId, undoContent) => {
+    const chatId = get().currentChatId;
+    if (!chatId) return;
+    const messages = get().messages.map((m) => (m.id === messageId ? { ...m, undoContent } : m));
+    set({ messages });
+    // Persist the full transcript so undo survives reloads.
+    const title = (await api.getChat(chatId).catch(() => null))?.title;
+    await api.saveChat(chatId, title ?? "Untitled chat", messages).catch(() => {});
+  },
+
+  persistMessages: async () => {
+    const chatId = get().currentChatId;
+    if (!chatId) return;
+    const messages = get().messages;
+    const title = (await api.getChat(chatId).catch(() => null))?.title;
+    await api.saveChat(chatId, title ?? "Untitled chat", messages).catch(() => {});
   },
 
   cancelChatJob: async (jobId) => {
@@ -261,7 +396,7 @@ export const useStore = create<Store>((set, get) => ({
     if (!chatId) return;
     await api.cancelChatJob(chatId, jobId).catch(() => {});
     const chat = await api.getChat(chatId).catch(() => null);
-    if (chat) set({ messages: chat.messages });
+    if (chat) set({ messages: chat.messages, chatSettings: chatSettingsOf(chat) });
   },
 
   retryChatJob: async (jobId) => {
@@ -269,7 +404,7 @@ export const useStore = create<Store>((set, get) => ({
     if (!chatId) return;
     await api.retryChatJob(chatId, jobId).catch(() => {});
     const chat = await api.getChat(chatId).catch(() => null);
-    if (chat) set({ messages: chat.messages });
+    if (chat) set({ messages: chat.messages, chatSettings: chatSettingsOf(chat) });
   },
 
   reloadSettings: async () => {
@@ -562,7 +697,8 @@ export const useStore = create<Store>((set, get) => ({
     })),
   popLastMessage: () =>
     set((s) => ({ messages: s.messages.slice(0, -1) })),
-  clearMessages: () => set({ messages: [] }),
+  clearMessages: () =>
+    set({ messages: [], failedEnqueues: {}, chatSettings: { modelId: null, personaId: null, temperature: null } }),
   loadChat: async (id) => {
     const chat = await api.getChat(id).catch(() => null);
     if (!chat) return;
@@ -571,10 +707,19 @@ export const useStore = create<Store>((set, get) => ({
       currentChatId: chat.id,
       view: "chat",
       sidebarTab: "code",
+      failedEnqueues: {},
+      chatSettings: chatSettingsOf(chat),
     });
   },
   startNewChat: () =>
-    set({ messages: [], currentChatId: null, view: "chat", sidebarTab: "code" }),
+    set({
+      messages: [],
+      currentChatId: null,
+      view: "chat",
+      sidebarTab: "code",
+      failedEnqueues: {},
+      chatSettings: { modelId: null, personaId: null, temperature: null },
+    }),
   setCurrentChatId: (id) => set({ currentChatId: id }),
   attachMessageSources: (sources) =>
     set((s) => {

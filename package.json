@@ -4,7 +4,8 @@
   "description": "Local-first personal workspace. Write. Tasks. Chat.",
   "type": "module",
   "bin": {
-    "persona": "dist/cli/index.js"
+    "persona": "dist/cli/index.js",
+    "persona-mcp": "dist/mcp/stdio.js"
   },
   "main": "dist/server/index.js",
   "files": [
@@ -16,7 +17,7 @@
   },
   "scripts": {
     "build": "npm run build:server && npm run build:web",
-    "build:server": "tsc -p tsconfig.json && chmod +x dist/cli/index.js",
+    "build:server": "tsc -p tsconfig.json && chmod +x dist/cli/index.js dist/mcp/stdio.js",
     "build:web": "vite build",
     "dev": "concurrently -k -n web,api -c blue,green \"npm:dev:web\" \"npm:dev:server\"",
     "dev:web": "vite",
@@ -37,6 +38,7 @@
     "@fontsource-variable/newsreader": "^5.3.0",
     "@hono/node-server": "^2.1.0",
     "@lezer/highlight": "^1.2.3",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@napi-rs/keyring": "^1.3.0",
     "@radix-ui/react-context-menu": "^2.3.7",
     "@radix-ui/react-dialog": "^1.1.23",
@@ -64,6 +66,7 @@
     "rehype-highlight": "^7.0.2",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
+    "zod": "^4.4.3",
     "zustand": "^5.0.14"
   },
   "devDependencies": {

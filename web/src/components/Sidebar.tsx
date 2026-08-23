@@ -22,11 +22,13 @@ import {
   MessageCircle,
   Timer,
   BookOpen,
+  Trash2,
 } from "lucide-react";
 import { useStore, type View } from "../state/store";
 import type { ModuleKey, TreeNode } from "../../../src/shared/types";
 import FileTree from "./FileTree";
 import JournalModule from "./JournalModule";
+import { api } from "../lib/api";
 
 const MIN_SIDEBAR_WIDTH = 180;
 const MAX_SIDEBAR_WIDTH = 420;
@@ -332,6 +334,19 @@ function PinboardSection() {
 /* Chat sidebar                                                          */
 /* -------------------------------------------------------------------- */
 
+function dateGroupLabel(ts: number): string {
+  const d = new Date(ts);
+  const now = new Date();
+  const startOf = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const today = startOf(now);
+  const yesterday = today - 86400000;
+  const weekAgo = today - 6 * 86400000;
+  if (d.getTime() >= today) return "Today";
+  if (d.getTime() >= yesterday) return "Yesterday";
+  if (d.getTime() >= weekAgo) return "This week";
+  return "Older";
+}
+
 function ChatSidebarContent() {
   const setView = useStore((s) => s.setView);
   const startNewChat = useStore((s) => s.startNewChat);
@@ -340,12 +355,32 @@ function ChatSidebarContent() {
   const currentChatId = useStore((s) => s.currentChatId);
   const tree = useStore((s) => s.tree);
   const tasks = useStore((s) => s.tasks);
-  const toggleExpand = useStore((s) => s.toggleExpand);
+  const renameChat = useStore((s) => s.renameChat);
+  const deleteChat = useStore((s) => s.deleteChat);
 
-  const todoTasks = useMemo(
-    () => tasks.filter((t) => t.status === "todo").slice(0, 5),
-    [tasks],
-  );
+  const [q, setQ] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return chats;
+    return chats.filter((c) => c.title.toLowerCase().includes(needle) || c.preview.toLowerCase().includes(needle));
+  }, [chats, q]);
+
+  const groups = useMemo(() => {
+    const map = new Map<string, typeof filtered>();
+    for (const c of filtered) {
+      const label = dateGroupLabel(c.updatedAt);
+      const arr = map.get(label);
+      if (arr) arr.push(c);
+      else map.set(label, [c]);
+    }
+    const order = ["Today", "Yesterday", "This week", "Older"];
+    return order.filter((k) => map.has(k)).map((k) => ({ label: k, items: map.get(k)! }));
+  }, [filtered]);
+
+  const todoTasks = useMemo(() => tasks.filter((t) => t.status === "todo").slice(0, 5), [tasks]);
 
   const projects = useMemo(() => {
     const map = new Map<string, { name: string; count: number }>();
@@ -369,12 +404,20 @@ function ChatSidebarContent() {
     setView("write");
     const store = useStore.getState();
     if (store.expanded[id]) return;
-    // Expand the folder and every ancestor so it is visible in the tree.
     const parts = id.split("/");
     for (let i = 1; i <= parts.length; i++) {
       const p = parts.slice(0, i).join("/");
       if (!useStore.getState().expanded[p]) useStore.getState().toggleExpand(p);
     }
+  };
+
+  const beginRename = (id: string, title: string) => {
+    setEditingId(id);
+    setDraft(title);
+  };
+  const commitRename = () => {
+    if (editingId && draft.trim()) void renameChat(editingId, draft);
+    setEditingId(null);
   };
 
   return (
@@ -396,31 +439,88 @@ function ChatSidebarContent() {
         </button>
       </div>
 
-      {chats.length > 0 && (
-        <>
-          <SectionHeader title="Recent chats" />
-          <div className="space-y-0.5">
-            {chats.slice(0, 8).map((c) => (
-              <button
+      <div className="relative">
+        <Search className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-stone-400 dark:text-stone-500" />
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search chats…"
+          className="w-full pl-7 pr-2 py-1 rounded-md border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-700/50 text-[12px] outline-none focus:border-blue-400 focus:bg-white dark:focus:bg-stone-800"
+        />
+      </div>
+
+      {filtered.length === 0 && q && <p className="text-[11px] text-stone-400 px-2.5">No chats match “{q}”.</p>}
+
+      {groups.map((g) => (
+        <div key={g.label}>
+          <SectionHeader title={g.label} />
+          <div className="space-y-0.5 pt-0.5">
+            {g.items.map((c) => (
+              <div
                 key={c.id}
-                onClick={() => void loadChat(c.id)}
-                title={c.preview}
-                className={`w-full flex items-center gap-2 px-2.5 py-1 rounded-md text-[12.5px] hover:bg-stone-50 dark:hover:bg-stone-700/60 text-left ${
-                  currentChatId === c.id
-                    ? "text-blue-700 dark:text-blue-300"
-                    : "text-stone-600 dark:text-stone-400"
+                className={`group flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-stone-50 dark:hover:bg-stone-700/60 ${
+                  currentChatId === c.id ? "bg-stone-100 dark:bg-stone-700/60" : ""
                 }`}
               >
                 <MessageCircle className="w-3 h-3 text-stone-400 dark:text-stone-500 shrink-0" strokeWidth={1.8} />
-                <span className="flex-1 text-left truncate">{c.title}</span>
-                <span className="text-[10px] text-stone-400 dark:text-stone-500 shrink-0">
+                {editingId === c.id ? (
+                  <input
+                    autoFocus
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onBlur={commitRename}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitRename();
+                      if (e.key === "Escape") setEditingId(null);
+                    }}
+                    className="flex-1 min-w-0 text-[12.5px] bg-white dark:bg-stone-800 border border-blue-300 dark:border-blue-600 rounded px-1 py-0.5 outline-none"
+                  />
+                ) : (
+                  <button
+                    onClick={() => void loadChat(c.id)}
+                    title={c.preview}
+                    className={`flex-1 min-w-0 text-left truncate text-[12.5px] ${
+                      currentChatId === c.id ? "text-blue-700 dark:text-blue-300" : "text-stone-600 dark:text-stone-400"
+                    }`}
+                  >
+                    {c.title}
+                  </button>
+                )}
+                <span className="text-[10px] text-stone-400 dark:text-stone-500 shrink-0 hidden group-hover:inline">
                   {relativeTime(new Date(c.updatedAt).toISOString())}
                 </span>
-              </button>
+                {editingId !== c.id && (
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 shrink-0">
+                    <button
+                      onClick={() => beginRename(c.id, c.title)}
+                      title="Rename"
+                      className="p-1 rounded hover:bg-stone-200 dark:hover:bg-stone-600 text-stone-400 hover:text-stone-700"
+                    >
+                      <PenLine className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={() => void api.exportChat(c.id).catch(() => {})}
+                      title="Export as Markdown"
+                      className="p-1 rounded hover:bg-stone-200 dark:hover:bg-stone-600 text-stone-400 hover:text-stone-700"
+                    >
+                      <FolderOpen className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (confirm(`Delete “${c.title}”?`)) void deleteChat(c.id);
+                      }}
+                      title="Delete"
+                      className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-950/40 text-stone-400 hover:text-red-600"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+              </div>
             ))}
           </div>
-        </>
-      )}
+        </div>
+      ))}
 
       <SectionHeader title="Projects" icon={<FolderOpen className="w-3 h-3" />} />
       <div className="space-y-0.5">

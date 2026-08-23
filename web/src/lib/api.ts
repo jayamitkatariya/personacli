@@ -2,6 +2,7 @@ import type {
   ChatMessage,
   ChatMeta,
   ChatSearchHit,
+  ChatSettingsInput,
   ChatSource,
   ChatTranscript,
   ContextItem,
@@ -11,6 +12,7 @@ import type {
   ImportSource,
   LockSettings,
   ParsedTask,
+  Persona,
   Pinboard,
   SearchResults,
   Settings,
@@ -275,6 +277,47 @@ export const api = {
     request<ChatMessage>(`/api/chats/${chatId}/jobs/${jobId}/cancel`, { method: "POST" }),
   retryChatJob: (chatId: string, jobId: string) =>
     request<ChatMessage>(`/api/chats/${chatId}/jobs/${jobId}/retry`, { method: "POST" }),
+  editChatMessage: (chatId: string, messageId: string, content: string) =>
+    request<ChatTranscript>(`/api/chats/${chatId}/messages/${messageId}/edit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
+    }),
+  forkChat: (chatId: string, messageId: string) =>
+    request<ChatTranscript>(`/api/chats/${chatId}/fork`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messageId }),
+    }),
+  getPersonas: () => request<Persona[]>("/api/personas"),
+  updateChatSettings: (chatId: string, patch: ChatSettingsInput) =>
+    request<ChatTranscript>(`/api/chats/${chatId}/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    }),
+  resolveChatApproval: (chatId: string, approvalId: string, approve: boolean) =>
+    request<ChatMessage>(`/api/chats/${chatId}/approvals/${approvalId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ approve }),
+    }),
+  exportChat: async (chatId: string): Promise<void> => {
+    const res = await fetch(`/api/chats/${chatId}/export`);
+    if (!res.ok) throw new Error(await res.text());
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition") ?? "";
+    const m = /filename="?([^"]+)"?/.exec(cd);
+    const filename = m?.[1] ?? `${chatId}.md`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  },
 
   importPreview: (source: ImportSource, path: string) =>
     request<ImportPreview>("/api/import/preview", {

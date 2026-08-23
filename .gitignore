@@ -4,6 +4,7 @@ web/dist/
 *.log
 .DS_Store
 .testhome/
+.testhome-mcp/
 bin/
 .env
 *.local
