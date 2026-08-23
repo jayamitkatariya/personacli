@@ -1,18 +1,52 @@
 # Persona
 
+[![GitHub stars](https://img.shields.io/github/stars/jayamitkatariya/personacli?style=social)](https://github.com/jayamitkatariya/personacli/stargazers)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-green.svg)](package.json)
+[![macOS](https://img.shields.io/badge/platform-macOS-lightgrey)]()
 
-Local-first personal workspace. Write notes, track tasks, talk to an AI that
-knows your files — everything stored as plain Markdown on your machine.
+Notes, tasks, and an AI chat that knows your files. Everything lives in one folder
+of plain Markdown on your machine.
 
 ```
 $ persona
 ```
 
-Starts the local server, opens your browser, and you're in your workspace.
-No accounts, no cloud, no database. If Persona disappeared tomorrow, your
-data is still just `.md` files.
+That starts a local server and opens your workspace in the browser. No accounts,
+no cloud, no database. If this project vanished tomorrow, you'd still have every
+note and task as `.md` files you can open with anything.
+
+## Why another notes app?
+
+Because I kept choosing between nice software and owning my data:
+
+| | Persona | Obsidian | Notion | Logseq |
+|---|---|---|---|---|
+| Data format | plain Markdown | Markdown + plugins | proprietary cloud DB | org-mode/Markdown |
+| Works fully offline | ✅ | ✅ | ❌ | ✅ |
+| Built-in tasks | ✅ | plugin | ✅ | basic |
+| Local AI chat | ✅ Ollama, zero config | via cloud API plugins | their cloud | ❌ |
+| Voice input | ✅ local STT | ❌ | ❌ | ❌ |
+| Open source | ✅ MIT | freemium, closed | closed | ✅ AGPL |
+
+I used Obsidian daily for two years. Somewhere around plugin thirty I realized I
+was maintaining my note setup more than writing in it. Persona is my attempt at
+the version where everything important just works out of the box and the data
+format never holds you hostage.
+
+## What you get
+
+- **Markdown notes** — files on disk in whatever folder structure you like. Edit
+  them from any app; Persona watches the filesystem and keeps up
+- **Tasks** — write `fix login bug #backend !! friday` and it sorts out priority,
+  project tag and due date into frontmatter. Kanban view included
+- **AI chat** — connects to [Ollama](https://ollama.com) automatically if it's
+  running (free and private), or use any OpenAI-compatible API. It can create
+  notes and manage tasks, not just answer questions
+- **Semantic search** — embeddings computed locally, stored inside the workspace
+- **Voice input** — local speech-to-text via parakeet.cpp on Apple Silicon
+- **MCP server** — Claude Code, Cursor and other agents can read/write your
+  workspace directly
 
 ## Screenshots
 
@@ -28,77 +62,70 @@ data is still just `.md` files.
 
 ## Quick start (macOS)
 
-### Prerequisites
-
-- **Node.js ≥ 20** — install via [Homebrew](https://brew.sh)
-  (`brew install node`) or [nvm](https://github.com/nvm-sh/nvm).
-  Check with `node --version`.
-- **Git** — comes with Xcode Command Line Tools
-  (`xcode-select --install`), or `brew install git`.
-- macOS **12+** (Apple Silicon recommended — voice input runs on Metal).
-  Windows and Linux aren't supported yet.
-
-### 1. Get the code
+You need Node.js 20+ (`brew install node`) and git.
 
 ```sh
 git clone https://github.com/jayamitkatariya/personacli.git
 cd personacli
-```
-
-### 2. Install dependencies and build
-
-```sh
 npm install --allow-scripts=persona
-```
-
-This installs everything and builds the server, CLI and web app for you.
-To build manually (e.g. after a `git pull`):
-
-```sh
-npm run build
-```
-
-### 3. Install the `persona` command
-
-```sh
 npm install -g . --allow-scripts=persona
-```
-
-### 4. Run it
-
-```sh
 persona
 ```
 
-The first run opens a setup guide in your browser: pick a workspace folder
-(created for you if it doesn't exist), optionally connect an AI model, and
-you're in. A `Notes/Welcome.md` note greets you with a tour.
+First run walks you through picking a workspace folder and optionally connecting
+an AI model. After that it's just `persona`.
 
-### Verify it works
+### Want the AI to run free and private?
+
+```sh
+brew install ollama && ollama pull llama3.2
+persona   # detects ollama automatically, no config
+```
+
+<details>
+<summary>More commands, updating, voice input setup, uninstalling</summary>
 
 ```sh
 persona doctor   # health check: node, workspace, server, AI config
-persona path     # prints your workspace path
+persona path     # print workspace path
 ```
 
-### Updating
-
+Updating:
 ```sh
-cd personacli
-git pull
-npm install --allow-scripts=persona       # installs new deps and rebuilds
-npm install -g . --allow-scripts=persona  # update the `persona` command itself
+cd personacli && git pull
+npm install --allow-scripts=persona
+npm install -g . --allow-scripts=persona
 ```
 
-### Uninstalling
-
+Uninstalling:
 ```sh
 npm uninstall -g persona
-pkill -f "dist/server/index"  # stop a running server, if any
-rm -rf ~/.persona              # config; AI keys stay in Keychain — delete
-                               # the "persona" service entries in Keychain Access
-                               # to remove them
+pkill -f "dist/server/index"
+rm -rf ~/.persona
 ```
+
+Troubleshooting lives in full detail further down this README.
+
+</details>
+
+## The stack
+
+TypeScript end to end. React UI served by a Hono server, Vite for builds.
+Local embeddings for search, parakeet.cpp for voice, Ollama or any
+OpenAI-compatible endpoint for chat. Boring tech on purpose.
+
+## Contributing
+
+Issues and PRs welcome, especially bug reports from real usage. If something
+feels off, it probably is; tell me.
+
+## License
+
+[MIT](LICENSE)
+
+---
+
+If Persona saves you some sanity, a star helps other people find it.
 
 ### Optional extras
 
