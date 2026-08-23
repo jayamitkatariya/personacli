@@ -352,3 +352,7 @@ persona CLI ── spawns ──▶ local Hono server (127.0.0.1:4321 — first 
                               ▼
                     React app (prebuilt, served by the server)
 ```
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=jayamitkatariya/personacli&type=Date)](https://star-history.com/#jayamitkatariya/personacli&Date)
