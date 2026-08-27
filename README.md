@@ -5,62 +5,13 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D20-green.svg)](package.json)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey)]()
 
-Notes, tasks, and an AI chat that knows your files. Everything lives in one folder
-of plain Markdown on your machine.
+Your notes stay `.md` files. The AI reads them, and cites them.
 
-```
-$ persona
-```
+A local-first workspace for notes, tasks, and grounded chat. No accounts, no cloud, no database. If this project vanished tomorrow, you'd still have every file.
 
-That starts a local server and opens your workspace in the browser. No accounts,
-no cloud, no database. If this project vanished tomorrow, you'd still have every
-note and task as `.md` files you can open with anything.
+<!-- demo.gif lands here when Hard worker ships it -->
 
-## Why another notes app?
-
-Because I kept choosing between nice software and owning my data:
-
-| | Persona | Obsidian | Notion | Logseq |
-|---|---|---|---|---|
-| Data format | plain Markdown | Markdown + plugins | proprietary cloud DB | org-mode/Markdown |
-| Works fully offline | ✅ | ✅ | ❌ | ✅ |
-| Built-in tasks | ✅ | plugin | ✅ | basic |
-| Local AI chat | ✅ Ollama, zero config | via cloud API plugins | their cloud | ❌ |
-| Voice input | ✅ local STT | ❌ | ❌ | ❌ |
-| Open source | ✅ MIT | freemium, closed | closed | ✅ AGPL |
-
-I used Obsidian daily for two years. Somewhere around plugin thirty I realized I
-was maintaining my note setup more than writing in it. Persona is my attempt at
-the version where everything important just works out of the box and the data
-format never holds you hostage.
-
-## What you get
-
-- **Markdown notes** — files on disk in whatever folder structure you like. Edit
-  them from any app; Persona watches the filesystem and keeps up
-- **Tasks** — write `fix login bug #backend !! friday` and it sorts out priority,
-  project tag and due date into frontmatter. Kanban view included
-- **AI chat** — connects to [Ollama](https://ollama.com) automatically if it's
-  running (free and private), or use any OpenAI-compatible API. It can create
-  notes and manage tasks, not just answer questions
-- **Semantic search** — embeddings computed locally, stored inside the workspace
-- **Voice input** — local speech-to-text via parakeet.cpp on Apple Silicon
-- **MCP server** — Claude Code, Cursor and other agents can read/write your
-  workspace directly
-
-## Screenshots
-
-<p align="center">
-  <img src="docs/screenshots/chat.png" alt="Chat view — ask questions about your workspace" width="100%">
-</p>
-<p align="center">
-  <img src="docs/screenshots/workspace.png" alt="Workspace view — write and edit Markdown notes" width="100%">
-</p>
-<p align="center">
-  <img src="docs/screenshots/tasks.png" alt="Tasks view — personal task list with project tags" width="100%">
-</p>
-
-## Quick start (macOS)
+## Install (macOS)
 
 You need Node.js 20+ (`brew install node`) and git.
 
@@ -74,8 +25,7 @@ Then start Persona:
 persona
 ```
 
-First run walks you through picking a workspace folder and optionally connecting
-an AI model. After that it's just `persona`.
+First run walks you through picking a workspace folder and optionally connecting an AI model. After that it's just `persona`.
 
 ### Want the AI to run free and private?
 
@@ -84,8 +34,29 @@ brew install ollama && ollama pull llama3.2
 persona   # detects ollama automatically, no config
 ```
 
+## What you get
+
+- **Markdown notes** — files on disk in whatever folder structure you like. Edit them from any app; Persona watches the filesystem and keeps up
+- **Tasks** — write `fix login bug #backend !! friday` and it parses priority, project tag, and due date into frontmatter. Kanban view included
+- **AI chat** — connects to [Ollama](https://ollama.com) automatically if it's running (free and private), or use any OpenAI-compatible API. Creates notes, manages tasks, and cites your files when answering
+- **Semantic search** — embeddings computed locally, stored in your workspace
+- **Voice input** — local speech-to-text on Apple Silicon
+- **MCP server** — Claude Code, Cursor, and other agents can read/write your workspace
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/chat.png" alt="Chat view — ask questions about your workspace" width="100%">
+</p>
+<p align="center">
+  <img src="docs/screenshots/workspace.png" alt="Workspace view — write and edit Markdown notes" width="100%">
+</p>
+<p align="center">
+  <img src="docs/screenshots/tasks.png" alt="Tasks view — personal task list with project tags" width="100%">
+</p>
+
 <details>
-<summary>More commands, updating, voice input setup, uninstalling</summary>
+<summary>More commands, updating, uninstalling</summary>
 
 ```sh
 persona doctor   # health check: node, workspace, server, AI config
@@ -94,16 +65,16 @@ persona path     # print workspace path
 
 Updating:
 ```sh
-cd personacli && git pull
-npm install --allow-scripts=persona
-npm install -g . --allow-scripts=persona
+# Re-run the installer (auto-updates when persona is already installed)
+curl -fsSL https://raw.githubusercontent.com/jayamitkatariya/personacli/main/install.sh | bash
 ```
 
 Uninstalling:
 ```sh
 npm uninstall -g persona
 pkill -f "dist/server/index"
-rm -rf ~/.persona
+rm -rf ~/.personacli  # installer location
+rm -rf ~/.persona     # workspace config
 ```
 
 Troubleshooting lives in full detail further down this README.
