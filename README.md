@@ -10,7 +10,7 @@ Your notes stay `.md` files. The AI reads them, and cites them.
 A local-first workspace for notes, tasks, and grounded chat. No accounts, no cloud, no database. If this project vanished tomorrow, you'd still have every file.
 
 <p align="center">
-  <img src="docs/screenshots/demo.gif" alt="Persona: notes, tasks, and chat that cites your Markdown files" />
+  <img src="docs/screenshots/demo.gif" alt="Ask a question, get an answer cited from your own notes" width="100%">
 </p>
 
 ## Install (macOS)
