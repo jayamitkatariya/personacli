@@ -65,10 +65,12 @@ format never holds you hostage.
 You need Node.js 20+ (`brew install node`) and git.
 
 ```sh
-git clone https://github.com/jayamitkatariya/personacli.git
-cd personacli
-npm install --allow-scripts=persona
-npm install -g . --allow-scripts=persona
+curl -fsSL https://raw.githubusercontent.com/jayamitkatariya/personacli/main/install.sh | bash
+```
+
+Then start Persona:
+
+```sh
 persona
 ```
 
