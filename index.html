@@ -12,6 +12,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,san
 .wrap{max-width:900px;margin:0 auto;padding:0 24px}
 header{padding:80px 0 40px;text-align:center}
 h1{font-size:clamp(2.2rem,6vw,3.4rem);letter-spacing:-.03em;margin-bottom:12px}
+h1 code{background:var(--card);padding:2px 8px;border-radius:6px;font-size:0.9em}
 h1 span{background:linear-gradient(90deg,#7c95ff,#4ade80);-webkit-background-clip:text;background-clip:text;color:transparent}
 .tagline{font-size:1.25rem;color:var(--muted);max-width:640px;margin:0 auto}
 .pill{display:inline-block;margin-top:20px;padding:6px 14px;border:1px solid var(--border);border-radius:999px;color:var(--muted);font-size:.85rem}
@@ -37,18 +38,21 @@ footer a{color:var(--fg)}
 </head>
 <body>
 <header class="wrap">
-<h1>Your second brain,<br><span>still just .md files.</span></h1>
-<p class="tagline">Persona is a local-first personal workspace — notes, tasks, and an AI chat that answers from your own files.</p>
-<span class="pill">No accounts · No cloud · No database · MIT licensed</span>
+<h1>Your notes stay <code>.md</code> files.<br><span>The AI reads them, and cites them.</span></h1>
+<p class="tagline">A local-first workspace for notes, tasks, and grounded chat. No accounts, no cloud, no database.</p>
+<span class="pill">If this project vanished tomorrow, you'd still have every file · MIT licensed</span>
 <div class="cta">
 <a class="btn primary" href="https://github.com/jayamitkatariya/personacli">★ Star on GitHub</a>
-<a class="btn secondary" href="https://github.com/jayamitkatariya/personacli#getting-started">Get started</a>
+<a class="btn secondary" href="https://github.com/jayamitkatariya/personacli#install-macos">Install</a>
 </div>
 </header>
 <main class="wrap">
 <section>
-<h2>One command and you're in</h2>
-<pre>$ persona   <span style="color:#8b949e"># starts local server, opens your browser</span></pre>
+<h2>Install (macOS)</h2>
+<p style="color:var(--muted);text-align:center;margin-bottom:16px">You need Node.js 20+ and git</p>
+<pre>curl -fsSL https://raw.githubusercontent.com/jayamitkatariya/personacli/main/install.sh | bash</pre>
+<p style="color:var(--muted);text-align:center;margin-top:16px">Then start Persona:</p>
+<pre style="margin-top:8px">persona</pre>
 </section>
 <div class="grid">
 <div class="card"><h3>📄 Plain Markdown forever</h3><p>If Persona disappeared tomorrow, your data is still a folder of <code>.md</code> files any editor can open. Zero lock-in.</p></div>
