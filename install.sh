@@ -63,11 +63,19 @@ echo ""
 if command -v persona &> /dev/null; then
   echo -e "${YELLOW}⚠${NC}  persona command already exists at: $(which persona)"
   echo ""
-  read -p "Update existing installation? (y/n) " -n 1 -r
-  echo ""
-  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Installation cancelled."
-    exit 0
+  
+  # Check if stdin is a TTY (interactive) or a pipe (curl|bash)
+  if [ -t 0 ]; then
+    # Interactive: prompt user, read from /dev/tty
+    read -p "Update existing installation? (y/n) " -n 1 -r < /dev/tty
+    echo ""
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+      echo "Installation cancelled."
+      exit 0
+    fi
+  else
+    # Non-interactive (curl|bash): auto-update
+    echo "Updating existing installation..."
   fi
   echo ""
 fi
